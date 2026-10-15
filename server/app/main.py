@@ -11,6 +11,7 @@ from app.services.ws_manager import ws_manager
 from app.routers import agents, messages, reviews, domains, settings_router, api_keys, mcp, stats, outbox, webhooks, contacts, suppressions, public_unsubscribe, templates, ses_feedback, engagements, conversations, meta, events
 from app.routers import account as account_router, starter_templates as starter_templates_router
 from app.routers import public_review
+from app.routers import metrics as metrics_router
 from app.routers import attachment_downloads
 from app.security import authenticate_token
 from app.rate_limit import ApiRateLimitMiddleware
@@ -286,6 +287,7 @@ async def live_dashboard_websocket(websocket: WebSocket):
 
 # Routers
 app.include_router(stats.router)
+app.include_router(metrics_router.router)
 app.include_router(outbox.router)
 app.include_router(webhooks.router)
 app.include_router(events.router)

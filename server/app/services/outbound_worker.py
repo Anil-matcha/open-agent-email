@@ -3,9 +3,11 @@
 import asyncio
 import datetime
 import logging
+import time
 
 from sqlalchemy import or_, select, update
 
+from app import metrics_registry
 from app.database import AsyncSessionLocal
 from app.models import Agent, Message, OutboundJob
 from app.services.email_service import EmailService
@@ -110,6 +112,7 @@ async def _dispatch_one() -> bool:
         await db.commit()
         await db.refresh(job)
         claim_locked_at = job.locked_at
+        logger.debug("claimed outbound job %s attempt %s", job.id, job.attempts)
 
         message = await db.get(Message, job.message_id)
         # Agent's primary key is `id`; messages reference the inbox by its unique email address.
@@ -231,12 +234,14 @@ async def _dispatch_one() -> bool:
 async def run_outbound_worker() -> None:
     while True:
         try:
+            metrics_registry.set_gauge("outbound_worker_heartbeat_timestamp_seconds", time.time())
             found = await _dispatch_one()
             if not found:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             raise
         except Exception:
+            metrics_registry.inc("outbound_worker_iteration_errors_total")
             logger.exception("Outbound worker iteration failed")
             await asyncio.sleep(1)
 

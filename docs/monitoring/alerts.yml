@@ -1,0 +1,107 @@
+# Example Prometheus alert rules for Open Agent Email. Adjust thresholds to your traffic and load them with
+#   rule_files: ["alerts.yml"]
+# Metric meanings are in docs/monitoring.md. Scrape every server process; counters are per process.
+groups:
+  - name: open-agent-email
+    rules:
+      - alert: OaeDown
+        expr: up{job="open-agent-email"} == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "Open Agent Email is not answering scrapes"
+
+      - alert: OaeOutboundWorkerDown
+        expr: oae_outbound_worker_up == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The outbound worker is not running on {{ $labels.instance }}; queued mail will not leave"
+
+      - alert: OaeOutboundWorkerStalled
+        expr: oae_outbound_worker_heartbeat_age_seconds > 120
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The outbound worker on {{ $labels.instance }} has not polled for over two minutes"
+
+      - alert: OaeOutboxBacklogAging
+        expr: max(oae_outbox_oldest_pending_age_seconds) > 600
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: "A due outbound job has waited over 10 minutes; check the worker and the upstream relay"
+
+      - alert: OaeOutboxBacklogGrowing
+        expr: max(oae_outbox_jobs{status="pending"}) > 500
+        for: 10m
+        labels: {severity: warn}
+        annotations:
+          summary: "More than 500 outbound jobs are pending"
+
+      - alert: OaeJobStuckProcessing
+        expr: max(oae_outbox_oldest_processing_age_seconds) > 240
+        for: 1m
+        labels: {severity: warn}
+        annotations:
+          summary: "A job has been claimed for over 4 minutes; at 5 minutes it becomes uncertain and needs an operator"
+
+      - alert: OaeUncertainDelivery
+        expr: max(oae_outbox_jobs{status="uncertain"}) > 0
+        for: 1m
+        labels: {severity: page}
+        annotations:
+          summary: "Outbound jobs have an uncertain SMTP outcome; confirm duplicate risk before retrying"
+
+      - alert: OaeOutboundFailures
+        expr: max(oae_outbox_jobs{status="failed"}) > 0
+        for: 15m
+        labels: {severity: warn}
+        annotations:
+          summary: "Outbound jobs have failed permanently; inspect the outbox and the relay"
+
+      - alert: OaeWebhookWorkerDown
+        expr: oae_webhook_worker_up == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The webhook worker is not running on {{ $labels.instance }}"
+
+      - alert: OaeWebhookDeliveriesFailing
+        expr: max(oae_webhook_deliveries{status="failed"}) > 20
+        for: 15m
+        labels: {severity: warn}
+        annotations:
+          summary: "Many webhook deliveries have exhausted their retries"
+
+      - alert: OaeWebhookBacklog
+        expr: max(oae_webhook_deliveries{status="pending"}) > 500
+        for: 15m
+        labels: {severity: warn}
+        annotations:
+          summary: "Webhook deliveries are backing up"
+
+      - alert: OaeSmtpListenerDown
+        expr: oae_smtp_listener_up == 0
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The SMTP listener is not accepting connections on {{ $labels.instance }}; inbound mail will bounce or queue at senders"
+
+      - alert: OaeSmtpConnectionCapReached
+        expr: increase(oae_smtp_sessions_refused_total[10m]) > 0
+        labels: {severity: warn}
+        annotations:
+          summary: "SMTP sessions were refused because the connection cap was reached"
+
+      - alert: OaeAttachmentScannerFailing
+        expr: increase(oae_smtp_messages_total{result="scanner_unavailable"}[10m]) > 0
+        labels: {severity: page}
+        annotations:
+          summary: "Inbound mail is being deferred because the attachment scanner is unavailable"
+
+      - alert: OaeWorkerLoopErrors
+        expr: increase(oae_outbound_worker_iteration_errors_total[10m]) > 5
+        labels: {severity: warn}
+        annotations:
+          summary: "The outbound worker loop is raising errors; check the logs (usually the database)"

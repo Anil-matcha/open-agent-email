@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     
     # Set explicitly in the environment; no built-in administrator credential.
     ADMIN_API_KEY: str = ""
+    # Optional separate bearer token that may read only /metrics (for a Prometheus scraper).
+    METRICS_TOKEN: str = ""
     # Fernet key used to encrypt configured SMTP relay passwords at rest.
     SMTP_CONFIG_ENCRYPTION_KEY: str = ""
     # Optional old key during rotation; remove it after startup re-encrypts credentials.

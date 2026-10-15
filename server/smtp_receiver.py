@@ -18,6 +18,7 @@ import os
 # Add server directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from app import metrics_registry
 from app.database import AsyncSessionLocal
 from app.models import Agent
 from app.services.email_service import EmailService
@@ -120,6 +121,19 @@ class SmtpHandler:
         return "250 Recipient OK"
 
     async def handle_DATA(self, server, session, envelope):
+        result = await self._handle_data(server, session, envelope)
+        if result.startswith("250"):
+            outcome = "accepted"
+        elif "scanner temporarily unavailable" in result:
+            outcome = "scanner_unavailable"
+        elif result.startswith("4"):
+            outcome = "deferred"
+        else:
+            outcome = "rejected"
+        metrics_registry.inc("smtp_messages_total", result=outcome)
+        return result
+
+    async def _handle_data(self, server, session, envelope):
         raw_bytes = envelope.original_content
         if isinstance(raw_bytes, str):
             raw_bytes = raw_bytes.encode("utf-8")
@@ -258,11 +272,13 @@ def _smtp_protocol_factory():
                 super().connection_made(transport)
                 return
             if _ACTIVE_SMTP_CONNECTIONS >= MAX_CONNECTIONS:
+                metrics_registry.inc("smtp_sessions_refused_total")
                 self._connection_admitted = False
                 transport.write(b"421 Too many SMTP connections; try again later\r\n")
                 transport.close()
                 return
             _ACTIVE_SMTP_CONNECTIONS += 1
+            metrics_registry.inc("smtp_sessions_total")
             self._connection_counted = True
             self._connection_admitted = True
             try:
