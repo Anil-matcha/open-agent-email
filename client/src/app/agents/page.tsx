@@ -6,12 +6,15 @@ import {
   Plus,
   Trash2,
   Save,
-  Lock,
   Sparkles
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Agent } from "@/lib/types";
 import { Dropdown } from "@/components/Dropdown";
+import { ProtectionPanel } from "@/components/agents/ProtectionPanel";
+import { MetricsPanel } from "@/components/agents/MetricsPanel";
+import { TestSendPanel } from "@/components/agents/TestSendPanel";
+import { DeletedInboxes } from "@/components/agents/DeletedInboxes";
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -27,12 +30,11 @@ export default function AgentsPage() {
   const [newHitl, setNewHitl] = useState<boolean>(true);
   const [creating, setCreating] = useState<boolean>(false);
 
-  // Edit State
-  const [editSensitivity, setEditSensitivity] = useState<string>("medium");
-  const [editHitl, setEditHitl] = useState<boolean>(true);
+  // Edit State (protection settings live in ProtectionPanel)
   const [editAutoReply, setEditAutoReply] = useState<boolean>(false);
   const [editPrompt, setEditPrompt] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
+  const [deletedRefresh, setDeletedRefresh] = useState<number>(0);
 
   const fetchAgents = async () => {
     try {
@@ -51,10 +53,19 @@ export default function AgentsPage() {
     }
   };
 
+  // Reload the list without changing which inbox is open.
+  const refreshList = async () => {
+    try {
+      const ags = await api.getAgents();
+      setAgents(ags);
+      setSelectedAgent((current) => ags.find((a) => a.id === current?.id) ?? current);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const selectAgent = (ag: Agent) => {
     setSelectedAgent(ag);
-    setEditSensitivity(ag.threat_sensitivity);
-    setEditHitl(ag.hitl_enabled);
     setEditAutoReply(ag.auto_reply_enabled);
     setEditPrompt(ag.auto_reply_prompt || "");
   };
@@ -94,8 +105,6 @@ export default function AgentsPage() {
     try {
       setSaving(true);
       const updated = await api.updateAgent(selectedAgent.email, {
-        threat_sensitivity: editSensitivity as any,
-        hitl_enabled: editHitl,
         auto_reply_enabled: editAutoReply,
         auto_reply_prompt: editPrompt,
       });
@@ -110,10 +119,11 @@ export default function AgentsPage() {
   };
 
   const handleDelete = async (email: string) => {
-    if (!confirm(`Are you sure you want to delete inbox ${email}?`)) return;
+    if (!confirm(`Delete inbox ${email}? It stops receiving mail but keeps its messages, and you can restore it from "Deleted inboxes" below.`)) return;
     try {
       await api.deleteAgent(email);
       await fetchAgents();
+      setDeletedRefresh((n) => n + 1);
     } catch (err: any) {
       alert(`Delete error: ${err.message}`);
     }
@@ -219,34 +229,11 @@ export default function AgentsPage() {
                 </button>
               </div>
 
-              {/* Custom Dropdown for Sensitivity */}
-              <div className="space-y-1">
-                <Dropdown
-                  label="Threat Scan Sensitivity"
-                  options={sensitivityOptions}
-                  value={editSensitivity}
-                  onChange={setEditSensitivity}
-                />
-              </div>
-
-              {/* HITL Toggle */}
-              <div className="p-3 rounded bg-[#0d1117] border border-[#30363d] flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-medium text-[#e6edf3] flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-[#8b949e]" />
-                    Human-in-the-Loop Approval Gate
-                  </div>
-                  <p className="text-[11px] text-[#8b949e]">
-                    Holds suspicious inbound emails in the review queue before agent delivery.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editHitl}
-                  onChange={(e) => setEditHitl(e.target.checked)}
-                  className="w-4 h-4 accent-[#238636] cursor-pointer"
-                />
-              </div>
+              <ProtectionPanel
+                key={selectedAgent.email}
+                email={selectedAgent.email}
+                onSaved={refreshList}
+              />
 
               {/* Auto-reply */}
               <div className="p-3 rounded bg-[#0d1117] border border-[#30363d] space-y-2">
@@ -289,8 +276,13 @@ export default function AgentsPage() {
                   className="px-4 py-1.5 rounded bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{saving ? "Saving..." : "Save Changes"}</span>
+                  <span>{saving ? "Saving..." : "Save auto-reply"}</span>
                 </button>
+              </div>
+
+              <div className="pt-3 border-t border-[#30363d] space-y-4">
+                <MetricsPanel key={`m-${selectedAgent.email}`} email={selectedAgent.email} />
+                <TestSendPanel email={selectedAgent.email} />
               </div>
             </div>
           ) : (
@@ -301,6 +293,8 @@ export default function AgentsPage() {
           )}
         </div>
       </div>
+
+      <DeletedInboxes key={deletedRefresh} onRestored={fetchAgents} />
 
       {/* Provision Modal */}
       {isCreateOpen && (
