@@ -18,13 +18,17 @@ export function Header() {
 
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" }).then((r) => setAuthenticated(r.ok)).catch(() => setAuthenticated(false));
+    // Local development serves the dashboard on :3000 and the API on :8000; behind a proxy /docs is the API.
+    if (window.location.port === "3000") setDocsUrl(`${window.location.protocol}//${window.location.hostname}:8000/docs`);
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated) return;
     fetch("/api/backend/health", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { shared_domain?: string } | null) => setSharedDomain(d?.shared_domain ?? ""))
       .catch(() => setSharedDomain(""));
-    // Local development serves the dashboard on :3000 and the API on :8000; behind a proxy /docs is the API.
-    if (window.location.port === "3000") setDocsUrl(`${window.location.protocol}//${window.location.hostname}:8000/docs`);
-  }, []);
+  }, [authenticated]);
 
   const connect = async (event: React.FormEvent) => {
     event.preventDefault();
