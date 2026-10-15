@@ -16,6 +16,25 @@ import { api } from "@/lib/api";
 import { Agent, EmailTemplate, EmailTemplatePreview, Message, MessageAttachment, OutboundAttachmentInput } from "@/lib/types";
 import { Dropdown } from "@/components/Dropdown";
 import { MessageSnippets } from "@/components/MessageSnippets";
+import { ScheduleField, scheduleProblem, toOffsetIso } from "@/components/inbox/ScheduleField";
+import { LabelEditor } from "@/components/inbox/LabelEditor";
+import { TriageBar } from "@/components/inbox/TriageBar";
+import { LifecycleTimeline } from "@/components/inbox/LifecycleTimeline";
+import { AttachmentList } from "@/components/inbox/AttachmentList";
+import {
+  TriageMessage,
+  SignedAttachment,
+  describeError,
+  deleteMessagePermanently,
+  getSignedAttachments,
+  listFilteredMessages,
+  replyScheduled,
+  restoreMessage,
+  sendScheduledMessage,
+  statusClasses,
+  trashMessage,
+  updateMessageLabels,
+} from "@/lib/inbox-api";
 
 function parseTemplateData(source: string): Record<string, unknown> {
   const value: unknown = JSON.parse(source);
@@ -31,7 +50,13 @@ export default function InboxPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
-  const [threadAttachments, setThreadAttachments] = useState<Record<string, MessageAttachment[]>>({});
+  const [threadAttachments, setThreadAttachments] = useState<Record<string, SignedAttachment[]>>({});
+  const [view, setView] = useState<"inbox" | "scheduled" | "trash">("inbox");
+  const [labelFilter, setLabelFilter] = useState<string>("");
+  const [labelInput, setLabelInput] = useState<string>("");
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [replySchedule, setReplySchedule] = useState<string>("");
+  const [composeSchedule, setComposeSchedule] = useState<string>("");
   const [filterDirection, setFilterDirection] = useState<"" | "inbound" | "outbound">("");
   const [filterReadStatus, setFilterReadStatus] = useState<"unread" | "read" | "all">("all");
   const [filterStatus, setFilterStatus] = useState<Message["status"] | "">("");
@@ -158,6 +183,29 @@ export default function InboxPage() {
       if (append) setLoadingMore(true);
       else setLoading(true);
       setListError("");
+      if (view !== "inbox" || labelFilter) {
+        // The cursor-paged list has no trash, scheduled or label filter, so these views use the plain list (newest 200).
+        const rows = await listFilteredMessages(selectedAgentEmail, {
+          trashed: view === "trash",
+          status: view === "scheduled" ? "scheduled" : filterStatus || undefined,
+          label: labelFilter || undefined,
+          direction: filterDirection || undefined,
+          limit: 200,
+        });
+        if (requestId !== messageRequestId.current) return;
+        const needle = searchQuery.toLowerCase();
+        const shown = rows.filter((row) =>
+          (filterReadStatus === "all" || (filterReadStatus === "unread" ? !row.is_read : row.is_read)) &&
+          (!needle || `${row.subject} ${row.sender} ${row.recipient}`.toLowerCase().includes(needle))
+        ) as unknown as Message[];
+        setMessages(shown);
+        setNextCursor(null);
+        if (!append) {
+          if (shown.length === 0) setSelectedMessage(null);
+          else if (!selectedMessage || !shown.some((item) => item.id === selectedMessage.id)) setSelectedMessage(shown[0]);
+        }
+        return;
+      }
       const page = await api.getMessagePage(selectedAgentEmail, {
         q: searchQuery || undefined,
         direction: filterDirection || undefined,
@@ -196,7 +244,7 @@ export default function InboxPage() {
     setMessages([]);
     setNextCursor(null);
     loadMessages();
-  }, [selectedAgentEmail, filterDirection, filterReadStatus, filterStatus, searchQuery]);
+  }, [selectedAgentEmail, filterDirection, filterReadStatus, filterStatus, searchQuery, view, labelFilter]);
 
   useEffect(() => {
     let active = true;
@@ -209,7 +257,7 @@ export default function InboxPage() {
           setThreadMessages(items);
           const entries = await Promise.all(items.map(async (item) => [
             item.id,
-            await api.getMessageAttachments(selectedAgentEmail, item.id),
+            await getSignedAttachments(selectedAgentEmail, item.id),
           ] as const));
           if (active) setThreadAttachments(Object.fromEntries(entries));
         })
@@ -305,12 +353,18 @@ export default function InboxPage() {
 
   const handleSendReply = async () => {
     if (!selectedMessage || (!replyTemplateId && !replyText.trim())) return;
+    if (scheduleProblem(replySchedule)) return;
     try {
       setSendingReply(true);
       const latestMessage = threadMessages[threadMessages.length - 1] || selectedMessage;
-      const reply = await api.replyMessage(selectedAgentEmail, latestMessage.id, replyTemplateId
+      const replyBody = replyTemplateId
         ? { template_id: replyTemplateId, template_data: parseTemplateData(replyTemplateData) }
-        : { body_text: replyText });
+        : { body_text: replyText };
+      const replyAt = replySchedule ? toOffsetIso(replySchedule) : null;
+      const reply = replyAt
+        ? ((await replyScheduled(selectedAgentEmail, latestMessage.id, { ...replyBody, scheduled_at: replyAt })) as unknown as Message)
+        : await api.replyMessage(selectedAgentEmail, latestMessage.id, replyBody);
+      setReplySchedule("");
       try { window.localStorage.removeItem(replyDraftKey); } catch { /* Best effort cleanup. */ }
       setReplyText("");
       setReplyTemplateId("");
@@ -319,10 +373,41 @@ export default function InboxPage() {
       await loadMessages();
       setSelectedMessage(reply);
     } catch (err: any) {
-      alert(`Failed to send reply: ${err.message}`);
+      alert(`Failed to send reply: ${describeError(err)}`);
     } finally {
       setSendingReply(false);
     }
+  };
+
+  // Triage: take a message out of the current list (trashed, restored or deleted) and move on to the next one.
+  const dropFromList = (id: string) => {
+    const remaining = messages.filter((item) => item.id !== id);
+    setMessages(remaining);
+    if (selectedMessage?.id === id) setSelectedMessage(remaining[0] ?? null);
+  };
+
+  const patchMessage = (updated: TriageMessage) => {
+    const merge = (item: Message) => (item.id === updated.id ? ({ ...item, ...updated } as unknown as Message) : item);
+    setMessages((current) => current.map(merge));
+    setThreadMessages((current) => current.map(merge));
+    setSelectedMessage((current) => (current && current.id === updated.id ? merge(current) : current));
+  };
+
+  const handleTrash = async (id: string) => {
+    await trashMessage(selectedAgentEmail, id).catch((err) => { throw new Error(describeError(err)); });
+    dropFromList(id);
+  };
+  const handleRestore = async (id: string) => {
+    await restoreMessage(selectedAgentEmail, id).catch((err) => { throw new Error(describeError(err)); });
+    dropFromList(id);
+  };
+  const handleDeleteForever = async (id: string) => {
+    await deleteMessagePermanently(selectedAgentEmail, id).catch((err) => { throw new Error(describeError(err)); });
+    dropFromList(id);
+  };
+  const handleLabelChange = async (id: string, change: { add_labels?: string[]; remove_labels?: string[] }) => {
+    const updated = await updateMessageLabels(selectedAgentEmail, id, change).catch((err) => { throw new Error(describeError(err)); });
+    patchMessage(updated);
   };
 
   const handleHandoff = async (event: React.FormEvent) => {
@@ -354,9 +439,11 @@ export default function InboxPage() {
   const handleComposeSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!composeRecipient || (!composeTemplateId && (!composeSubject || !composeBody))) return;
+    if (scheduleProblem(composeSchedule)) return;
     try {
       setSendingCompose(true);
-      const msg = await api.sendMessage(selectedAgentEmail, composeTemplateId
+      const composeAt = composeSchedule ? toOffsetIso(composeSchedule) : null;
+      const content = composeTemplateId
         ? {
           recipient: composeRecipient,
           template_id: composeTemplateId,
@@ -368,7 +455,11 @@ export default function InboxPage() {
           subject: composeSubject,
           body_text: composeBody,
           attachments: composeAttachments,
-        });
+        };
+      const msg = composeAt
+        ? ((await sendScheduledMessage(selectedAgentEmail, { ...content, scheduled_at: composeAt })) as unknown as Message)
+        : await api.sendMessage(selectedAgentEmail, content);
+      setComposeSchedule("");
       setIsComposeOpen(false);
       setComposeRecipient("");
       setComposeSubject("");
@@ -381,7 +472,7 @@ export default function InboxPage() {
       await loadMessages();
       setSelectedMessage(msg);
     } catch (err: any) {
-      alert(`Failed to send email: ${err.message}`);
+      alert(`Failed to send email: ${describeError(err)}`);
     } finally {
       setSendingCompose(false);
     }
@@ -432,6 +523,8 @@ export default function InboxPage() {
     );
   }
 
+  const isTrashed = view === "trash" || Boolean(selectedMessage && (selectedMessage as unknown as TriageMessage).deleted_at);
+
   const agentDropdownOptions = agents.map((ag) => ({
     value: ag.email,
     label: `${ag.display_name}`,
@@ -442,6 +535,11 @@ export default function InboxPage() {
     { value: "", label: "All Messages" },
     { value: "inbound", label: "Inbound Only" },
     { value: "outbound", label: "Outbound Only" },
+  ];
+  const viewOptions = [
+    { value: "inbox", label: "Inbox" },
+    { value: "scheduled", label: "Scheduled" },
+    { value: "trash", label: "Trash" },
   ];
   const readStatusOptions = [
     { value: "all", label: "All Read Statuses" },
@@ -478,6 +576,13 @@ export default function InboxPage() {
             />
           </div>
 
+          <div className="w-36">
+            <Dropdown
+              options={viewOptions}
+              value={view}
+              onChange={(value) => { setView(value as "inbox" | "scheduled" | "trash"); setSelectedMessage(null); }}
+            />
+          </div>
           <div className="w-44">
             <Dropdown
               options={directionOptions}
@@ -499,6 +604,22 @@ export default function InboxPage() {
               onChange={(value) => setFilterStatus(value as Message["status"] | "")}
             />
           </div>
+          <form
+            onSubmit={(event) => { event.preventDefault(); setLabelFilter(labelInput.trim()); }}
+            className="flex items-center gap-1"
+          >
+            <input
+              type="text"
+              value={labelInput}
+              onChange={(event) => { setLabelInput(event.target.value); if (!event.target.value.trim()) setLabelFilter(""); }}
+              placeholder="Filter by label"
+              aria-label="Filter by label"
+              className="w-36 bg-[#0d1117] border border-[#30363d] rounded p-2 text-xs text-[#e6edf3] placeholder-[#8b949e] focus:outline-none focus:border-zinc-500"
+            />
+            {labelFilter && (
+              <button type="button" onClick={() => { setLabelInput(""); setLabelFilter(""); }} className="text-[11px] text-[#8b949e] hover:text-[#e6edf3]">Clear</button>
+            )}
+          </form>
           <input
             type="search"
             value={searchInput}
@@ -532,6 +653,9 @@ export default function InboxPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-[#30363d]">
+            {(view !== "inbox" || labelFilter) && !loading && messages.length > 0 && (
+              <div className="p-2 text-[10px] text-[#8b949e]">Showing the newest {messages.length} matching messages. Paging is only available in the Inbox view without a label filter.</div>
+            )}
             {listError && (
               <div role="alert" className="p-3 text-xs text-[#f85149]">{listError}</div>
             )}
@@ -539,7 +663,7 @@ export default function InboxPage() {
               <div className="p-10 text-center text-xs text-[#8b949e]">Loading messages…</div>
             ) : messages.length === 0 ? (
               <div className="p-10 text-center text-xs text-[#8b949e]">
-                {searchQuery ? "No messages match this search." : "No messages found for this inbox."}
+                {searchQuery ? "No messages match this search." : view === "trash" ? "Trash is empty." : view === "scheduled" ? "No scheduled messages." : labelFilter ? "No messages carry this label." : "No messages found for this inbox."}
               </div>
             ) : (
               messages.map((msg) => {
@@ -583,22 +707,22 @@ export default function InboxPage() {
                         {msg.direction}
                       </span>
                       <span
-                        className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
-                          msg.status === "delivered" || msg.status === "accepted_by_relay"
-                            ? "bg-[#238636]/10 text-[#2ea043] border-[#2ea043]/30"
-                            : msg.status === "pending_review" || msg.status === "sending" || msg.status === "delivery_unknown"
-                            ? "bg-[#9e6a03]/10 text-[#d29922] border-[#d29922]/30"
-                            : "bg-[#da3633]/10 text-[#f85149] border-[#f85149]/30"
-                        }`}
+                        className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${statusClasses(msg.status)}`}
                       >
                         {msg.status.replace("_", " ")}
                       </span>
+                      {(msg as unknown as TriageMessage).labels?.map((tag) => (
+                        <span key={tag} className="text-[9px] px-1.5 py-0.2 rounded-full bg-[#21262d] border border-[#30363d] text-[#e6edf3]">{tag}</span>
+                      ))}
                       {msg.spf_status === "pass" && msg.dkim_status === "pass" && msg.dmarc_status === "pass" && (
                         <span className="text-[9px] font-mono text-[#2ea043] flex items-center gap-0.5 ml-auto">
                           <ShieldCheck className="w-3 h-3" /> VERIFIED
                         </span>
                       )}
                     </div>
+                    {(msg as unknown as TriageMessage).scheduled_for && String(msg.status) === "scheduled" && (
+                      <div className="mt-1 text-[10px] text-[#d29922]">Sends {new Date(`${(msg as unknown as TriageMessage).scheduled_for}Z`).toLocaleString()}</div>
+                    )}
                   </div>
                 );
               })
@@ -635,13 +759,7 @@ export default function InboxPage() {
                   </div>
 
                   <span
-                    className={`text-[10px] font-mono px-2 py-0.5 rounded border capitalize ${
-                      selectedMessage.status === "delivered" || selectedMessage.status === "accepted_by_relay"
-                        ? "bg-[#238636]/10 text-[#2ea043] border-[#2ea043]/30"
-                        : selectedMessage.status === "pending_review" || selectedMessage.status === "sending" || selectedMessage.status === "delivery_unknown"
-                        ? "bg-[#9e6a03]/10 text-[#d29922] border-[#d29922]/30"
-                        : "bg-[#da3633]/10 text-[#f85149] border-[#f85149]/30"
-                    }`}
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded border capitalize ${statusClasses(selectedMessage.status)}`}
                   >
                     {selectedMessage.status.replace("_", " ")}
                   </span>
@@ -674,11 +792,48 @@ export default function InboxPage() {
                     DMARC: <strong className={selectedMessage.dmarc_status === "pass" ? "text-[#2ea043]" : "text-[#f85149]"}>{selectedMessage.dmarc_status.toUpperCase()}</strong>
                   </span>
                 </div>
+
+                {isTrashed && (
+                  <p role="status" className="rounded border border-[#30363d] bg-[#0d1117] p-2 text-[11px] text-[#d29922]">
+                    This message is in the trash. Restore it to reply or forward. Trashed messages are removed for good after the retention period.
+                  </p>
+                )}
+
+                <TriageBar
+                  trashed={isTrashed}
+                  scheduled={String(selectedMessage.status) === "scheduled"}
+                  onTrash={() => handleTrash(selectedMessage.id)}
+                  onRestore={() => handleRestore(selectedMessage.id)}
+                  onDeleteForever={() => handleDeleteForever(selectedMessage.id)}
+                />
+
+                <LabelEditor
+                  labels={(selectedMessage as unknown as TriageMessage).labels ?? []}
+                  disabled={isTrashed}
+                  onAdd={(label) => handleLabelChange(selectedMessage.id, { add_labels: [label] })}
+                  onRemove={(label) => handleLabelChange(selectedMessage.id, { remove_labels: [label] })}
+                />
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowHistory((open) => !open)}
+                    aria-expanded={showHistory}
+                    className="text-[11px] text-[#58a6ff] hover:underline"
+                  >
+                    {showHistory ? "Hide history" : "Show history"}
+                  </button>
+                  {showHistory && (
+                    <div className="mt-2">
+                      <LifecycleTimeline agentEmail={selectedAgentEmail} messageId={selectedMessage.id} />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Conversation */}
               <div className="p-4 flex-1 overflow-y-auto space-y-3">
-                {(threadMessages.length ? threadMessages : [selectedMessage]).map((message) => {
+                {(threadMessages.length && !isTrashed ? threadMessages : [selectedMessage]).map((message) => {
                   const messageAttachments = threadAttachments[message.id] || [];
                   return (
                     <article key={message.id} className={`rounded border p-3 ${message.id === selectedMessage.id ? "border-blue-500/50 bg-[#161b22]" : "border-[#30363d] bg-[#0d1117]"}`}>
@@ -686,7 +841,7 @@ export default function InboxPage() {
                         <span className="font-mono">
                           {message.direction === "inbound" ? message.sender : `Agent → ${message.recipient}`}
                         </span>
-                        <span>{new Date(message.created_at).toLocaleString()} · {message.status.replace("_", " ")}</span>
+                        <span>{new Date(message.created_at).toLocaleString()} · {String(message.status).replace("_", " ")}</span>
                       </div>
                       <div className="mb-2 text-xs font-semibold text-[#e6edf3]">{message.subject || "(No Subject)"}</div>
                       <div className="text-xs text-[#c9d1d9] whitespace-pre-wrap leading-relaxed font-sans">{message.body_text}</div>
@@ -702,28 +857,14 @@ export default function InboxPage() {
                         </div>
                       )}
                       {messageAttachments.length > 0 && (
-                        <div className="mt-3 border-t border-[#30363d] pt-2">
-                          <div className="mb-1.5 text-[10px] font-semibold text-[#8b949e]">Attachments ({messageAttachments.length})</div>
-                          <div className="space-y-1">
-                            {messageAttachments.map((attachment) => (
-                              <a
-                                key={attachment.id}
-                                href={`/api/backend/v1/agents/${encodeURIComponent(selectedAgentEmail)}/messages/${message.id}/attachments/${attachment.id}`}
-                                className="flex items-center justify-between gap-3 rounded border border-[#30363d] px-2.5 py-1.5 text-[11px] text-[#58a6ff] hover:bg-[#161b22]"
-                              >
-                                <span className="truncate">{attachment.filename}</span>
-                                <span className="shrink-0 text-[#8b949e]">{(attachment.size_bytes / 1024).toFixed(1)} KB</span>
-                              </a>
-                            ))}
-                          </div>
-                        </div>
+                        <AttachmentList attachments={messageAttachments} agentEmail={selectedAgentEmail} messageId={message.id} />
                       )}
                     </article>
                   );
                 })}
               </div>
 
-              <form onSubmit={handleHandoff} className="p-3 border-t border-[#30363d] bg-[#0d1117] space-y-2">
+              {!isTrashed && <form onSubmit={handleHandoff} className="p-3 border-t border-[#30363d] bg-[#0d1117] space-y-2">
                 <div className="text-[11px] text-[#e6edf3] flex items-center gap-1.5">
                   <Forward className="w-3 h-3 text-amber-400" /> Hand off to a person
                 </div>
@@ -738,10 +879,10 @@ export default function InboxPage() {
                   </button>
                 </div>
                 {handoffResult && <p className="text-[11px] text-[#d29922]">{handoffResult}</p>}
-              </form>
+              </form>}
 
               {/* In-Thread Reply */}
-              <div className="p-3 border-t border-[#30363d] bg-[#161b22] space-y-2">
+              {!isTrashed && <div className="p-3 border-t border-[#30363d] bg-[#161b22] space-y-2">
                 <div className="text-[11px] text-[#8b949e] flex items-center justify-between">
                   <span className="flex items-center gap-1 text-[#e6edf3]">
                     <Reply className="w-3 h-3 text-blue-400" /> Reply in-thread
@@ -797,18 +938,19 @@ export default function InboxPage() {
                   placeholder="Type in-thread response..."
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2.5 text-xs text-[#e6edf3] placeholder-[#8b949e] focus:outline-none focus:border-zinc-500 resize-none disabled:opacity-50"
                 />
+                <ScheduleField value={replySchedule} onChange={setReplySchedule} />
                 <div className="flex justify-end">
                   {replyText && !replyTemplateId && <span className="mr-auto self-center text-[10px] text-[#8b949e]">Draft saved on this device</span>}
                   <button
                     onClick={handleSendReply}
-                    disabled={sendingReply || (!replyTemplateId && !replyText.trim())}
+                    disabled={sendingReply || Boolean(scheduleProblem(replySchedule)) || (!replyTemplateId && !replyText.trim())}
                     className="px-3 py-1.5 rounded bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
                   >
                     <Send className="w-3 h-3" />
-                    <span>{sendingReply ? "Sending..." : "Send Reply"}</span>
+                    <span>{sendingReply ? "Sending..." : replySchedule ? "Schedule Reply" : "Send Reply"}</span>
                   </button>
                 </div>
-              </div>
+              </div>}
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-[#8b949e]">
@@ -931,6 +1073,8 @@ export default function InboxPage() {
                 )}
               </div>
 
+              <ScheduleField value={composeSchedule} onChange={setComposeSchedule} />
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -941,10 +1085,10 @@ export default function InboxPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={sendingCompose}
+                  disabled={sendingCompose || Boolean(scheduleProblem(composeSchedule))}
                   className="px-3 py-1.5 rounded bg-[#238636] hover:bg-[#2ea043] disabled:opacity-50 text-white font-medium"
                 >
-                  {sendingCompose ? "Sending..." : "Send"}
+                  {sendingCompose ? "Sending..." : composeSchedule ? "Schedule" : "Send"}
                 </button>
               </div>
             </form>
