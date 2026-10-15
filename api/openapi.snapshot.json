@@ -1152,6 +1152,13 @@
       },
       "DomainResponse": {
         "properties": {
+          "capabilities": {
+            "additionalProperties": true,
+            "description": "What this domain can do now: receiving needs MX; sending needs SPF and DKIM. DMARC is advisory.",
+            "readOnly": true,
+            "title": "Capabilities",
+            "type": "object"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1216,6 +1223,13 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "status_detail": {
+            "additionalProperties": true,
+            "description": "Per-record state with the aliases `missing` (not found yet) and `failed` (wrong value or lookup error).\n\nThe original `*_status` fields keep their values (`pending`, `mismatch`, `error`, `verified`).",
+            "readOnly": true,
+            "title": "Status Detail",
+            "type": "object"
           }
         },
         "required": [
@@ -1231,7 +1245,9 @@
           "dkim_status",
           "dmarc_record",
           "dmarc_status",
-          "created_at"
+          "created_at",
+          "status_detail",
+          "capabilities"
         ],
         "title": "DomainResponse",
         "type": "object"
@@ -3511,6 +3527,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -3790,6 +3825,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -3990,6 +4044,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -4385,6 +4458,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -4512,6 +4604,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -4898,6 +5009,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -5147,6 +5277,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -6946,6 +7095,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -7219,6 +7387,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -7658,6 +7845,25 @@
               "title": "Scope",
               "type": "string"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -8017,6 +8223,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -8316,6 +8541,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -8581,6 +8825,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -8931,6 +9194,25 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
+            }
           }
         ],
         "responses": {
@@ -9059,6 +9341,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -9290,6 +9591,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],
@@ -9630,6 +9950,25 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Alias for cursor",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alias for cursor",
+              "title": "Page Token"
             }
           }
         ],

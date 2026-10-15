@@ -21,6 +21,7 @@ from app.schemas import (
 from app.security import require_agent_access, require_write
 from app.services.cursors import decode_cursor, encode_cursor
 from sqlalchemy import and_, or_
+from app.routers.paging import merge_page_token
 
 
 router = APIRouter(
@@ -147,7 +148,8 @@ async def list_templates(
 
 @router.get("/page")
 async def list_templates_page(email: str, limit: int = Query(50, ge=1, le=200),
-                              cursor: str | None = Query(None, max_length=2048), db: AsyncSession = Depends(get_db)):
+                              cursor: str | None = Query(None, max_length=2048), db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor")):
+    cursor = merge_page_token(cursor, page_token)
     await _ensure_agent(email, db)
     scope = f"/v1/agents/{email}/templates"
     query = select(EmailTemplate).where(EmailTemplate.agent_email == email).order_by(EmailTemplate.updated_at.desc(), EmailTemplate.id).limit(limit + 1)

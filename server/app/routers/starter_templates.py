@@ -15,6 +15,7 @@ from app.schemas import EmailTemplatePreviewRequest, EmailTemplateResponse
 from app.security import Principal, require_agent_access, require_read, require_write
 from app.services.starter_templates import STARTER_TEMPLATES, get_starter
 from app.services.cursors import decode_cursor, encode_cursor
+from app.routers.paging import merge_page_token
 
 router = APIRouter(tags=["Templates"])
 
@@ -46,8 +47,9 @@ async def list_starter_templates():
 @router.get("/v1/starter-templates/page", dependencies=[Depends(require_read)])
 async def list_starter_templates_page(
     limit: int = Query(50, ge=1, le=200),
-    cursor: str | None = Query(None, max_length=2048),
+    cursor: str | None = Query(None, max_length=2048), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     scope = "/v1/starter-templates"
     start = 0
     if cursor:

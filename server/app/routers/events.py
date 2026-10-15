@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models import WebhookDelivery
 from app.routers import webhooks
 from app.security import Principal, require_admin
+from app.routers.paging import merge_page_token
 
 router = APIRouter(prefix="/v1/events", tags=["Events"], dependencies=[Depends(require_admin)])
 
@@ -22,7 +23,8 @@ async def list_events(agent_email: Optional[str] = Query(None, max_length=255),
                       until: Optional[datetime.datetime] = Query(None, description="Include events at or before this offset-qualified timestamp"),
                       limit: int = Query(50, ge=1, le=100),
                       cursor: Optional[str] = Query(None, max_length=2048),
-                      db: AsyncSession = Depends(get_db)):
+                      db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor")):
+    cursor = merge_page_token(cursor, page_token)
     page = await webhooks.page_deliveries(endpoint_id=None, status=status, event_type=event_type,
                                           agent_email=agent_email, since=since, until=until,
                                           limit=limit, cursor=cursor, db=db)

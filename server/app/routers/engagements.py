@@ -11,6 +11,7 @@ from app.models import Agent, Contact, ContactEngagement, RecipientSuppression
 from app.schemas import ContactEngagementResponse, ContactEngagementWrite, ContactEngagementUpdate
 from app.security import require_agent_access, require_write
 from app.services.cursors import decode_cursor, encode_cursor
+from app.routers.paging import merge_page_token
 
 router = APIRouter(
     prefix="/v1/agents/{email}/engagements",
@@ -85,8 +86,9 @@ async def list_engagements_page(
     due: bool = Query(False, description="Only currently due, unsuppressed follow-ups"),
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     await _get_agent(email, db)
     scope = f"/v1/agents/{email}/engagements?due={str(due).lower()}"
     query = select(ContactEngagement, Contact).join(

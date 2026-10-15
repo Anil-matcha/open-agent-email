@@ -17,11 +17,18 @@ Every error keeps its HTTP status and the historical `detail` field, and adds a 
 ```json
 {
   "detail": "Token is not authorized for this agent inbox",
-  "error": {"code": "forbidden_inbox", "message": "Token is not authorized for this agent inbox", "details": null}
+  "error": {
+    "code": "forbidden_inbox",
+    "message": "Token is not authorized for this agent inbox",
+    "details": null,
+    "fix": "Use the key issued for this inbox.",
+    "docs": "docs/errors.md#forbidden_inbox"
+  }
 }
 ```
 
 - `error.code` is stable and safe to branch on; `message` is for humans and may change.
+- `error.fix` is a short next step and `error.docs` points to this page's entry for the code. Both are present for every code in the table below and omitted for codes that are not listed.
 - Validation failures (`422`) set `code` to `validation_error` and `details` to a list of `{path, message, type}`; `detail` keeps FastAPI's original list.
 - Rate limits (`429`) send a `Retry-After` header and `error.details.retry_after_seconds`.
 - An unrecognized code should be handled by its HTTP status.
@@ -34,7 +41,7 @@ Every error keeps its HTTP status and the historical `detail` field, and adds a 
 
 def render() -> str:
     rows = "".join(
-        f"| `{code}` | {entry.status} | {entry.meaning} | {entry.retry} |\n"
+        f"| <a id=\"{code}\"></a>`{code}` | {entry.status} | {entry.meaning} | {entry.retry} |\n"
         for code, entry in sorted(CATALOG.items(), key=lambda item: (item[1].status, item[0]))
     )
     return HEADER + rows

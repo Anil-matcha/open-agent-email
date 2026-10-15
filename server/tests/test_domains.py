@@ -230,3 +230,27 @@ async def test_signature_survives_a_relay_that_rewrites_message_id_and_date(clie
     assert not dkim.verify(tampered, dnsfunc=published)
     h_tag = re.search(rb"h=([^;]+);", raw.split(b"\r\n\r\n")[0].replace(b"\r\n ", b"").replace(b"\n ", b"")).group(1).lower()
     assert b"message-id" not in h_tag and b"date" not in h_tag
+
+
+async def test_status_detail_and_capabilities_for_fresh_and_verified_domains(client, dns):
+    rec = await register(client)
+    assert rec["status_detail"] == {"mx": "missing", "spf": "missing", "dkim": "missing", "dmarc": "missing"}
+    assert rec["capabilities"] == {"receiving": False, "sending": False}
+    publish(dns, rec)
+    r = (await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)).json()
+    assert r["status_detail"] == {"mx": "verified", "spf": "verified", "dkim": "verified", "dmarc": "verified"}
+    assert r["capabilities"] == {"receiving": True, "sending": True}
+    assert r["mx_status"] == "verified"  # original fields are unchanged
+
+
+async def test_wrong_and_unresolvable_records_report_failed_but_keep_original_states(client, dns):
+    rec = await register(client)
+    dns.mx[D] = ["other.example.net"]
+    dns.txt[D] = [rec["spf_record"]]
+    dns.txt[f"{rec['dkim_selector']}._domainkey.{D}"] = [rec["dkim_record"]]
+    r = (await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)).json()
+    assert r["mx_status"] == "mismatch" and r["status_detail"]["mx"] == "failed"
+    assert r["capabilities"] == {"receiving": False, "sending": True}
+    dns.fail = True
+    r = (await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)).json()
+    assert r["mx_status"] == "error" and r["status_detail"]["mx"] == "failed"

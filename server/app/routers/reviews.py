@@ -15,6 +15,7 @@ from app.security import Principal, require_reviewer
 from app.services.cursors import decode_cursor, encode_cursor
 from app.services.idempotency import reserve_idempotency, complete_idempotency, release_idempotency_claim
 from sqlalchemy import and_, or_
+from app.routers.paging import merge_page_token
 
 router = APIRouter(prefix="/v1/reviews", tags=["HITL Reviews"])
 
@@ -48,8 +49,9 @@ async def list_reviews_page(
     status: Optional[str] = Query(None, pattern="^(pending|approved|rejected)$"),
     agent_email: Optional[str] = Query(None), limit: int = Query(50, ge=1, le=200),
     cursor: Optional[str] = Query(None, max_length=2048),
-    principal: Principal = Depends(require_reviewer), db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(require_reviewer), db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     scope = f"/v1/reviews|status={status or ''}|agent_email={agent_email or ''}|principal={principal.agent_email or 'admin'}"
     query = select(ReviewItem).options(selectinload(ReviewItem.message))
     if status:

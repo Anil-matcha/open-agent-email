@@ -12,6 +12,7 @@ from app.models import Message
 from app.schemas import MessageResponse
 from app.security import require_agent_access
 from app.services.cursors import decode_cursor, encode_cursor
+from app.routers.paging import merge_page_token
 
 router = APIRouter(
     prefix="/v1/agents/{email}/conversations",
@@ -67,8 +68,9 @@ async def list_conversations_page(
     email: str,
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     scope = f"/v1/agents/{email}/conversations"
     latest = (select(Message.thread_id.label("thread_id"), func.max(Message.created_at).label("latest"))
               .where(Message.agent_email == email, Message.deleted_at.is_(None))

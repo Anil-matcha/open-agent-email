@@ -2,7 +2,8 @@
 
 Every error response keeps its historical `detail` field and HTTP status and additionally carries
 
-    "error": {"code": "<catalog code>", "message": "<human text>", "details": {...} | [...] | null}
+    "error": {"code": "<catalog code>", "message": "<human text>", "details": {...} | [...] | null,
+              "fix": "<next step>", "docs": "docs/errors.md#<code>"}
 
 Codes are derived centrally from the status and message so existing raise sites are unchanged.
 The catalog below is published in docs/errors.md; a test keeps the two in sync.
@@ -131,8 +132,17 @@ def classify(status: int, message: str = "") -> str:
     return _STATUS_DEFAULT.get(status, "internal_error" if status >= 500 else "bad_request")
 
 
+DOCS_PATH = "docs/errors.md"
+
+
 def error_object(code: str, message: str, details=None) -> dict:
-    return {"code": code, "message": message, "details": details}
+    body = {"code": code, "message": message, "details": details}
+    entry = CATALOG.get(code)
+    if entry is not None:
+        # Catalog codes also say what to do next and where it is documented.
+        body["fix"] = entry.retry
+        body["docs"] = f"{DOCS_PATH}#{code}"
+    return body
 
 
 def error_body(status: int, message: str, *, code: str | None = None, details=None, detail=None) -> dict:

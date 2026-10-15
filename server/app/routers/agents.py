@@ -13,6 +13,7 @@ from app.security import require_admin
 from app.security import authenticate_token
 from app.database import AsyncSessionLocal
 from app.services.cursors import decode_cursor, encode_cursor
+from app.routers.paging import merge_page_token
 
 router = APIRouter(prefix="/v1/agents", tags=["Agents"], dependencies=[Depends(require_admin)])
 
@@ -30,8 +31,9 @@ async def list_agents(include_deleted: bool = Query(False, description="Also lis
 async def list_agents_page(
     include_deleted: bool = Query(False, description="Also list soft-deleted inboxes"),
     limit: int = Query(50, ge=1, le=200), cursor: str | None = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     scope = f"/v1/agents|include_deleted={include_deleted}"
     query = select(Agent).order_by(Agent.created_at.desc(), Agent.id.desc())
     if not include_deleted:

@@ -22,6 +22,7 @@ from app.schemas import (
     ApiKeyPageResponse,
     ApiKeyDeleteResponse,
 )
+from app.routers.paging import merge_page_token
 from app.security import Principal, require_admin
 from app.services.cursors import decode_cursor, encode_cursor
 from app.services.idempotency import (
@@ -44,7 +45,8 @@ async def list_api_keys(db: AsyncSession = Depends(get_db)):
 
 @router.get("/page")
 async def list_api_keys_page(limit: int = Query(50, ge=1, le=200), cursor: str | None = Query(None, max_length=2048),
-                             db: AsyncSession = Depends(get_db), *, scope: str = "/v1/api-keys"):
+                             db: AsyncSession = Depends(get_db), *, scope: str = "/v1/api-keys", page_token: str | None = Query(None, max_length=2048, description="Alias for cursor")):
+    cursor = merge_page_token(cursor, page_token)
     query = select(ApiKey).order_by(ApiKey.created_at.desc(), ApiKey.id.desc())
     if cursor:
         key, item_id = decode_cursor(cursor, scope=scope)
@@ -159,8 +161,9 @@ async def revoke_api_key(key_id: str, db: AsyncSession = Depends(get_db)):
 async def list_account_api_keys(
     limit: int = Query(100, ge=1, le=100),
     cursor: str | None = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ) -> AccountApiKeyPageResponse:
+    cursor = merge_page_token(cursor, page_token)
     query = select(ApiKey).where(ApiKey.scope.in_(("account", "agent"))).order_by(
         ApiKey.created_at.desc(), ApiKey.id.desc())
     if cursor:

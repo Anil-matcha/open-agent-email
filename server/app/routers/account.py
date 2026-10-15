@@ -24,6 +24,7 @@ from app.routers.webhooks import _endpoint_response
 from app.schemas import ContactCreate, ContactResponse, ContactUpdate
 from app.security import require_admin
 from app.services.cursors import decode_cursor, encode_cursor
+from app.routers.paging import merge_page_token
 
 router = APIRouter(tags=["Account"], dependencies=[Depends(require_admin)])
 
@@ -373,8 +374,9 @@ async def list_account_suppressions_page(
     address: Optional[str] = Query(None, max_length=320),
     limit: int = Query(50, ge=1, le=200),
     cursor: Optional[str] = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     normalized = _normalize_address(address) if address else None
     scope = f"/v1/account/suppressions?address={normalized or ''}"
     query = select(RecipientSuppression)
@@ -470,8 +472,9 @@ async def list_account_contacts_page(
     q: Optional[str] = Query(None, max_length=200, description="Match address, name or company"),
     limit: int = Query(50, ge=1, le=200),
     cursor: Optional[str] = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     normalized_agent = agent_email.strip().lower() if agent_email else None
     normalized_q = q.strip().lower() if q and q.strip() else None
     scope = f"/v1/contacts?agent_email={normalized_agent or ''}&q={normalized_q or ''}"

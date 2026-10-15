@@ -15,6 +15,7 @@ from app.models import Message, OutboundJob, OutboundRetryEvent
 from app.schemas import OutboundJobPageResponse, OutboundJobResponse, OutboundRetryEventResponse
 from app.security import Principal, require_admin
 from app.services.cursors import decode_cursor, encode_cursor
+from app.routers.paging import merge_page_token
 
 router = APIRouter(prefix="/v1/outbox", tags=["Outbound Queue"], dependencies=[Depends(require_admin)])
 OUTBOX_STATUSES = {"pending", "processing", "complete", "failed", "uncertain", "blocked"}
@@ -65,8 +66,9 @@ async def page_outbound_jobs(
     status: Optional[str] = Query(None, description="pending, processing, complete, failed, uncertain, or blocked"),
     limit: int = Query(50, ge=1, le=100),
     cursor: Optional[str] = Query(None, max_length=512),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     if status and status not in OUTBOX_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid outbox status")
     query = select(OutboundJob)
@@ -172,8 +174,9 @@ async def list_outbound_retry_events_page(
     job_id: str,
     limit: int = Query(50, ge=1, le=200),
     cursor: Optional[str] = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     if not await db.scalar(select(OutboundJob.id).where(OutboundJob.id == job_id)):
         raise HTTPException(status_code=404, detail="Outbound job not found")
     scope = f"/v1/outbox/{job_id}/retries"

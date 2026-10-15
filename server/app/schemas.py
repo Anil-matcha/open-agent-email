@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 
@@ -663,6 +663,31 @@ class DomainResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @computed_field
+    @property
+    def status_detail(self) -> dict:
+        """Per-record state with the aliases `missing` (not found yet) and `failed` (wrong value or lookup error).
+
+        The original `*_status` fields keep their values (`pending`, `mismatch`, `error`, `verified`).
+        """
+        alias = {"pending": "missing", "mismatch": "failed", "error": "failed"}
+        return {
+            name: alias.get(value, value)
+            for name, value in (
+                ("mx", self.mx_status), ("spf", self.spf_status),
+                ("dkim", self.dkim_status), ("dmarc", self.dmarc_status),
+            )
+        }
+
+    @computed_field
+    @property
+    def capabilities(self) -> dict:
+        """What this domain can do now: receiving needs MX; sending needs SPF and DKIM. DMARC is advisory."""
+        return {
+            "receiving": self.mx_status == "verified",
+            "sending": self.spf_status == "verified" and self.dkim_status == "verified",
+        }
 
 # --- SMTP Config Schemas ---
 class SmtpConfigUpdate(BaseModel):

@@ -114,7 +114,7 @@ async def test_429_has_header_and_retry_after_details():
 
 def test_every_catalog_code_is_documented_and_docs_have_no_unknown_codes():
     doc = (ROOT.parent / "docs" / "errors.md").read_text()
-    rows = dict(re.findall(r"^\| `([a-z_]+)` \| (\d{3}) \|", doc, flags=re.M))
+    rows = dict(re.findall(r"^\| (?:<a id=\"[a-z_]+\"></a>)?`([a-z_]+)` \| (\d{3}) \|", doc, flags=re.M))
     assert set(rows) == set(CATALOG), f"docs out of sync; run python scripts/render_error_docs.py: {set(rows) ^ set(CATALOG)}"
     for code, status in rows.items():
         assert int(status) == CATALOG[code].status, code
@@ -166,3 +166,20 @@ def test_unknown_messages_get_a_status_default_code(status):
 ])
 def test_specific_classifications(status, message, code):
     assert classify(status, message) == code
+
+
+def test_catalog_errors_carry_fix_and_docs_and_unknown_codes_omit_them():
+    from app.errors import error_object
+    known = error_object("forbidden_inbox", "m")
+    assert known["fix"] == CATALOG["forbidden_inbox"].retry
+    assert known["docs"] == "docs/errors.md#forbidden_inbox"
+    unknown = error_object("custom_code", "m")
+    assert "fix" not in unknown and "docs" not in unknown
+
+
+@pytest.mark.asyncio
+async def test_http_error_response_includes_fix_and_docs(client):
+    r = await client.get("/v1/agents", headers={"Authorization": "Bearer nope"})
+    err = r.json()["error"]
+    assert err["code"] == "unauthorized"
+    assert err["fix"] and err["docs"] == "docs/errors.md#unauthorized"

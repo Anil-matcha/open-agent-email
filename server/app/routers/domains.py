@@ -16,6 +16,7 @@ from app.services.webhook_events import enqueue_domain_webhook_event
 from app.services.cursors import decode_cursor, encode_cursor
 from app.services.idempotency import reserve_idempotency, complete_idempotency, release_idempotency_claim
 from sqlalchemy import and_, or_
+from app.routers.paging import merge_page_token
 
 router = APIRouter(prefix="/v1/domains", tags=["Domains"], dependencies=[Depends(require_admin)])
 
@@ -28,8 +29,9 @@ async def list_domains(db: AsyncSession = Depends(get_db)):
 @router.get("/page")
 async def list_domains_page(
     limit: int = Query(50, ge=1, le=200), cursor: str | None = Query(None, max_length=2048),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor"),
 ):
+    cursor = merge_page_token(cursor, page_token)
     scope = "/v1/domains"
     query = select(Domain).order_by(Domain.created_at.desc(), Domain.id.desc())
     if cursor:

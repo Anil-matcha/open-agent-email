@@ -21,6 +21,7 @@ from app.security import require_agent_access, require_write
 from app.services.cursors import decode_cursor, encode_cursor
 from app.security import Principal
 from app.services.idempotency import reserve_idempotency, complete_idempotency, release_idempotency_claim
+from app.routers.paging import merge_page_token
 
 
 router = APIRouter(
@@ -272,7 +273,8 @@ async def list_contacts(email: str, limit: int = Query(100, ge=1, le=500), db: A
 
 @router.get("/page")
 async def list_contacts_page(email: str, limit: int = Query(50, ge=1, le=200),
-                             cursor: str | None = Query(None, max_length=2048), db: AsyncSession = Depends(get_db)):
+                             cursor: str | None = Query(None, max_length=2048), db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor")):
+    cursor = merge_page_token(cursor, page_token)
     await _ensure_agent_exists(email, db)
     scope = f"/v1/agents/{email}/contacts"
     query = select(Contact).where(Contact.agent_email == email).order_by(Contact.name, Contact.email).limit(limit + 1)
@@ -532,7 +534,8 @@ async def list_contact_imports(email: str, db: AsyncSession = Depends(get_db)):
 @router.get("/imports/page")
 async def list_contact_imports_page(email: str, limit: int = Query(50, ge=1, le=200),
                                     cursor: str | None = Query(None, max_length=2048),
-                                    db: AsyncSession = Depends(get_db)):
+                                    db: AsyncSession = Depends(get_db), page_token: str | None = Query(None, max_length=2048, description="Alias for cursor")):
+    cursor = merge_page_token(cursor, page_token)
     scope = f"/v1/agents/{email}/contacts/imports"
     query = select(ContactImportBatch).where(ContactImportBatch.agent_email == email)
     if cursor:
