@@ -1,0 +1,44 @@
+# Production stack for a shared host. Standalone (does not extend docker-compose.yaml).
+# API and dashboard listen on localhost only, behind nginx; mail is published on port 25.
+name: open-agent-email
+
+services:
+  server:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OAE_API_PORT:-8200}:8000"
+      - "${OAE_SMTP_PORT:-25}:2525"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - SMTP_HOST=0.0.0.0
+      - SMTP_PORT=2525
+      - DATA_DIR=/data
+      - DATABASE_URL=sqlite+aiosqlite:////data/open_agent_email.db
+      - SHARED_DOMAIN=${SHARED_DOMAIN:-agents.local}
+      - MAIL_HOSTNAME=${MAIL_HOSTNAME:-}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-[]}
+      # Generated once into the data volume when not provided here.
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - SMTP_CONFIG_ENCRYPTION_KEY=${SMTP_CONFIG_ENCRYPTION_KEY:-}
+    volumes:
+      - oae-data:/data
+
+  client:
+    build:
+      context: ../client
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OAE_CLIENT_PORT:-3200}:3000"
+    environment:
+      - API_URL=http://server:8000
+    depends_on:
+      - server
+
+volumes:
+  oae-data:
