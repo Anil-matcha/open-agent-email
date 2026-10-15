@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Stats, Message, Agent, AccountMetrics } from "@/lib/types";
-import { FirstRunGuide } from "@/components/FirstRunGuide";
 
 export default function OverviewPage() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -21,8 +20,6 @@ export default function OverviewPage() {
   const [metrics, setMetrics] = useState<AccountMetrics | null>(null);
   const [metricsUnavailable, setMetricsUnavailable] = useState(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [guideDismissed, setGuideDismissed] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -56,12 +53,6 @@ export default function OverviewPage() {
     }
   };
 
-  // Offer the guided first-run flow only when there are no inboxes yet; it then
-  // stays open (even after the first inbox exists) until the user finishes it.
-  useEffect(() => {
-    if (!loading && agents.length === 0 && !guideDismissed) setGuideOpen(true);
-  }, [loading, agents.length, guideDismissed]);
-
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 4000);
@@ -82,14 +73,16 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      {guideOpen && (
-        <FirstRunGuide
-          onCreated={fetchData}
-          onDone={() => {
-            setGuideOpen(false);
-            setGuideDismissed(true);
-          }}
-        />
+      {!loading && agents.length === 0 && (
+        <div className="card-simple p-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-[#e6edf3]">Welcome. Set up your first inbox.</div>
+            <div className="text-xs text-[#8b949e]">A short guided setup, about 3 minutes: pick an address, get an API key, send and receive a test email.</div>
+          </div>
+          <Link href="/get-started" className="px-3 py-1.5 rounded bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-medium">
+            Get started
+          </Link>
+        </div>
       )}
 
       {/* Metrics Row */}
