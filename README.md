@@ -22,7 +22,6 @@ Give every agent a real email address. It can receive mail, reply in the same th
 - [awesome-open-source-saas-alternatives](https://github.com/Anil-matcha/awesome-open-source-saas-alternatives) — curated open-source alternatives to paid SaaS apps.
 - [open-agent-connector](https://github.com/Anil-matcha/open-agent-connector) — self-hosted MCP and REST gateway that connects agents to hundreds of app APIs; pairs with this project for agents that need both email and app access.
 - [awesome-generative-ai-apps](https://github.com/Anil-matcha/awesome-generative-ai-apps) — open-source generative AI apps you can clone and deploy.
-- [awesome-vibecoded-saas](https://github.com/Anil-matcha/awesome-vibecoded-saas) — open-source alternatives to SaaS tools people pay for.
 
 ## Why Open Agent Email
 
