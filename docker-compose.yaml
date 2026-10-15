@@ -30,6 +30,8 @@ services:
       - ATTACHMENT_SCAN_CHUNK_BYTES=${ATTACHMENT_SCAN_CHUNK_BYTES:-65536}
     volumes:
       - oae-data:/data
+      # Optional one-time import of a database from the old layout; see docs/operations.md.
+      - ${OAE_LEGACY_DB_FILE:-/dev/null}:/legacy/open_agent_email.db:ro
 
   clamav:
     image: clamav/clamav:1.4.3

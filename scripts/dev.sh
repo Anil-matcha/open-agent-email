@@ -5,6 +5,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/server"
 
+if (command -v lsof >/dev/null 2>&1 && lsof -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1) || \
+   (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 8000 >/dev/null 2>&1); then
+  echo "Port 8000 is already in use, so the server cannot start." >&2
+  echo "Stop the other process (or the earlier run of this script) and try again." >&2
+  exit 1
+fi
+
 if [ ! -d .venv ]; then
   if command -v uv >/dev/null 2>&1; then
     uv venv -q --python ">=3.11,<3.14" .venv
@@ -37,6 +44,7 @@ fi
 echo
 echo "Admin key:  $(grep '^ADMIN_API_KEY=' .env | cut -d= -f2-)"
 echo "API:        http://127.0.0.1:8000   (docs at /docs)"
+echo "Dashboard:  cd client && npm install && npm run dev   (http://localhost:3000)"
 echo "Quickstart: docs/quickstart.md"
 echo
 exec .venv/bin/python run.py

@@ -31,6 +31,26 @@ Restore:
 
 Rehearse a restore into a scratch environment on a schedule; an untested backup is not evidence.
 
+## Upgrading an existing Docker install
+
+Earlier Compose files kept the SQLite database in `./server/open_agent_email.db` on the host. The stack now keeps it in the `oae-data` Docker volume, so an upgraded install starts with an empty database unless you import the old file once.
+
+1. Stop the stack and copy the old file somewhere safe: `docker compose down && cp server/open_agent_email.db server/open_agent_email.db.bak`.
+2. Pull the new version, then start with the old file mounted for one-time import. Use the same `SMTP_CONFIG_ENCRYPTION_KEY` as before, because stored webhook secrets, relay passwords and domain signing keys are encrypted with it and cannot be read with a different key:
+
+   ```bash
+   export SMTP_CONFIG_ENCRYPTION_KEY=<the key you used before>
+   export ADMIN_API_KEY=<your existing admin key>        # optional; one is generated otherwise
+   OAE_LEGACY_DB_FILE="$PWD/server/open_agent_email.db" docker compose up -d --build
+   ```
+
+3. Check the log: `docker compose logs server | grep -i "legacy database"`. It reports either an import or that the volume already had a database.
+4. From the next start you can drop `OAE_LEGACY_DB_FILE`. The import never runs when the volume already holds a database, and it never modifies or deletes the original file.
+
+If you run with the service `.env`, put the same variables there. The import copies the database and any `-wal` and `-shm` files next to it; stop the old stack cleanly first so nothing is half-written.
+
+This procedure has been tested at the script level (entrypoint run against temporary directories for first import, repeat start, missing file and existing volume database). It has not been run through Docker itself, so try it on a copy of your data first.
+
 ## Encryption key rotation
 
 1. Generate a new Fernet key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
