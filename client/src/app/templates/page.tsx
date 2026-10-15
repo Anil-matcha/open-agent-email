@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Agent, EmailTemplate, EmailTemplatePreview } from "@/lib/types";
 import { api } from "@/lib/api";
+import { starterApi } from "@/lib/ops-api";
+import { StarterTemplates } from "@/components/StarterTemplates";
 import { FileText, Pencil, Plus, Trash2, X } from "lucide-react";
 
 const inputClass = "w-full rounded-md border border-[#30363d] bg-[#0d1117] px-3 py-2 text-xs text-[#e6edf3] outline-none focus:border-[#58a6ff]";
@@ -21,6 +23,8 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,7 +47,7 @@ export default function TemplatesPage() {
 
   useEffect(() => { void loadTemplates(); }, [loadTemplates]);
 
-  const resetForm = () => { setFields(emptyFields); setEditingId(null); setPreview(null); };
+  const resetForm = () => { setFields(emptyFields); setEditingId(null); setPreview(null); setCheckResult(null); };
   const editTemplate = (template: EmailTemplate) => {
     setEditingId(template.id);
     setFields({ name: template.name, subject: template.subject, body_text: template.body_text, body_html: template.body_html });
@@ -85,6 +89,19 @@ export default function TemplatesPage() {
     } finally { setPreviewing(false); }
   };
 
+  // Stateless syntax check: works without an inbox and stores nothing.
+  const runCheck = async () => {
+    try {
+      setChecking(true); setError(null); setCheckResult(null);
+      const data: unknown = JSON.parse(previewData);
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Preview data must be a JSON object.");
+      const result = await starterApi.validate({ subject: fields.subject, body_text: fields.body_text, body_html: fields.body_html, data: data as Record<string, unknown> });
+      setCheckResult(`Valid. Variables used: ${result.variables.length ? result.variables.join(", ") : "none"}.`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not check the template");
+    } finally { setChecking(false); }
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-8">
       <header className="flex flex-col justify-between gap-4 border-b border-[#30363d] pb-6 sm:flex-row sm:items-center">
@@ -102,6 +119,8 @@ export default function TemplatesPage() {
 
       {error && <div role="alert" className="rounded-md border border-[#f85149]/40 bg-[#f85149]/10 px-4 py-3 text-xs text-[#ff7b72]">{error}</div>}
 
+      <StarterTemplates agentEmail={agentEmail} onCopied={() => void loadTemplates()} />
+
       {agentEmail && <form onSubmit={saveTemplate} className="space-y-4 rounded-lg border border-[#30363d] bg-[#161b22] p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-[#e6edf3]">{editingId ? "Edit template" : "Create a template"}</h2>
@@ -116,6 +135,8 @@ export default function TemplatesPage() {
         <div className="flex flex-wrap gap-2">
           <button disabled={saving} className="inline-flex items-center gap-2 rounded-md bg-[#238636] px-3 py-2 text-xs font-medium text-white hover:bg-[#2ea043] disabled:opacity-50"><Plus className="h-3.5 w-3.5"/>{saving ? "Saving…" : editingId ? "Save template" : "Create template"}</button>
           <button type="button" disabled={previewing} onClick={() => void runPreview()} className="rounded-md border border-[#30363d] px-3 py-2 text-xs text-[#c9d1d9] hover:bg-[#21262d] disabled:opacity-50">{previewing ? "Previewing…" : "Preview current fields"}</button>
+          <button type="button" disabled={checking} onClick={() => void runCheck()} className="rounded-md border border-[#30363d] px-3 py-2 text-xs text-[#c9d1d9] hover:bg-[#21262d] disabled:opacity-50">{checking ? "Checking…" : "Check syntax"}</button>
+          {checkResult && <span role="status" className="self-center text-xs text-[#3fb950]">{checkResult}</span>}
         </div>
         <div className="grid gap-3 border-t border-[#30363d] pt-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <label className="space-y-1 text-xs text-[#8b949e]">Preview data (JSON object)<textarea rows={5} className={`${inputClass} font-mono`} value={previewData} onChange={(e) => { setPreviewData(e.target.value); setPreview(null); }} /></label>

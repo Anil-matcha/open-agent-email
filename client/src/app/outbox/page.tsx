@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, Clock3, RefreshCw, RotateCcw, Send } from "lucide-react";
 import { api } from "@/lib/api";
 import { OutboundJob, OutboundJobStatus, OutboundRetryEvent } from "@/lib/types";
+import { retryApi } from "@/lib/ops-api";
 
 const FILTERS: { label: string; value: OutboundJobStatus | "" }[] = [
   { label: "All", value: "" },
@@ -34,6 +35,8 @@ export default function OutboxPage() {
   const [jobs, setJobs] = useState<OutboundJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<OutboundJob | null>(null);
   const [retryEvents, setRetryEvents] = useState<OutboundRetryEvent[]>([]);
+  const [retryNext, setRetryNext] = useState<string | null>(null);
+  const [retryMoreLoading, setRetryMoreLoading] = useState(false);
   const [status, setStatus] = useState<OutboundJobStatus | "">("");
   const [cursor, setCursor] = useState<string | undefined>();
   const [previousCursors, setPreviousCursors] = useState<(string | undefined)[]>([]);
@@ -71,14 +74,15 @@ export default function OutboxPage() {
   useEffect(() => {
     if (!selectedJob) {
       setRetryEvents([]);
+      setRetryNext(null);
       setHistoryError("");
       return;
     }
     let active = true;
     setHistoryLoading(true);
     setHistoryError("");
-    api.getOutboundRetryEvents(selectedJob.id, 100)
-      .then((events) => { if (active) setRetryEvents(events); })
+    retryApi.page(selectedJob.id, 25)
+      .then((page) => { if (active) { setRetryEvents(page.items); setRetryNext(page.next_cursor); } })
       .catch((err) => { if (active) setHistoryError(err instanceof Error ? err.message : "Could not load retry history."); })
       .finally(() => { if (active) setHistoryLoading(false); });
     return () => { active = false; };
@@ -94,7 +98,9 @@ export default function OutboxPage() {
       const updated = await api.retryOutboundJob(selectedJob.id, confirmDuplicateRisk);
       setSelectedJob(updated);
       try {
-        setRetryEvents(await api.getOutboundRetryEvents(updated.id, 100));
+        const page = await retryApi.page(updated.id, 25);
+        setRetryEvents(page.items);
+        setRetryNext(page.next_cursor);
       } catch (err) {
         setHistoryError(err instanceof Error ? err.message : "Could not load retry history.");
       }
@@ -182,7 +188,16 @@ export default function OutboxPage() {
                   {event.previous_error && <div className="mt-2 border-l-2 border-[#f85149]/50 pl-2 text-[10px] text-[#ff7b72] whitespace-pre-wrap break-words">{event.previous_error}</div>}
                 </article>)}
               </div>}
-              {!historyLoading && retryEvents.length === 100 && <p className="mt-2 text-[10px] text-[#8b949e]">Showing the latest 100 retry events.</p>}
+              {!historyLoading && retryNext && selectedJob && <div className="mt-3 text-center"><button disabled={retryMoreLoading} onClick={async () => {
+                setRetryMoreLoading(true);
+                try {
+                  const page = await retryApi.page(selectedJob.id, 25, retryNext);
+                  setRetryEvents((previous) => [...previous, ...page.items]);
+                  setRetryNext(page.next_cursor);
+                } catch (err) {
+                  setHistoryError(err instanceof Error ? err.message : "Could not load more retry history.");
+                } finally { setRetryMoreLoading(false); }
+              }} className="rounded border border-[#30363d] px-3 py-1.5 text-[11px] text-[#c9d1d9] hover:bg-[#21262d] disabled:opacity-50">{retryMoreLoading ? "Loading…" : "Load older retries"}</button></div>}
             </div>
           </> : <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-[#8b949e]"><Send className="w-8 h-8 mb-2 text-[#8b949e]" />Select an outbound job to inspect.</div>}
         </section>

@@ -18,6 +18,8 @@ import {
   Ban,
   FileText,
   CalendarClock,
+  Activity,
+  UserRound,
 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -59,6 +61,7 @@ export function Sidebar() {
     },
     { name: "Outbox", href: "/outbox", icon: Archive },
     { name: "Webhooks", href: "/webhooks", icon: Webhook },
+    { name: "Event log", href: "/events", icon: Activity },
     { name: "Domains & DNS", href: "/domains", icon: Globe },
     { name: "Upstream SMTP", href: "/settings", icon: Sliders },
     { name: "API Keys", href: "/api-keys", icon: Key },
@@ -67,6 +70,7 @@ export function Sidebar() {
     { name: "Follow-ups", href: "/engagements", icon: CalendarClock },
     { name: "Templates", href: "/templates", icon: FileText },
     { name: "Suppressions", href: "/suppressions", icon: Ban },
+    { name: "Account", href: "/account", icon: UserRound },
     { name: "MCP Gateway", href: "/mcp", icon: Cpu },
   ];
 
