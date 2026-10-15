@@ -15,6 +15,7 @@ import {
 import { api } from "@/lib/api";
 import { Agent, EmailTemplate, EmailTemplatePreview, Message, MessageAttachment, OutboundAttachmentInput } from "@/lib/types";
 import { Dropdown } from "@/components/Dropdown";
+import { serverDate } from "@/lib/time";
 import { MessageSnippets } from "@/components/MessageSnippets";
 import { ScheduleField, scheduleProblem, toOffsetIso } from "@/components/inbox/ScheduleField";
 import { LabelEditor } from "@/components/inbox/LabelEditor";
@@ -683,7 +684,7 @@ export default function InboxPage() {
                         {msg.direction === "inbound" ? msg.sender : `To: ${msg.recipient}`}
                       </span>
                       <span className="text-[10px] font-mono text-[#8b949e] shrink-0">
-                        {new Date(msg.created_at).toLocaleTimeString([], {
+                        {serverDate(msg.created_at).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
@@ -754,7 +755,7 @@ export default function InboxPage() {
                     </h3>
                     <div className="text-[11px] text-[#8b949e] font-mono mt-0.5">
                       Thread: {selectedMessage.thread_id} ·{" "}
-                      {new Date(selectedMessage.created_at).toLocaleString()}
+                      {serverDate(selectedMessage.created_at).toLocaleString()}
                     </div>
                   </div>
 
@@ -841,7 +842,7 @@ export default function InboxPage() {
                         <span className="font-mono">
                           {message.direction === "inbound" ? message.sender : `Agent → ${message.recipient}`}
                         </span>
-                        <span>{new Date(message.created_at).toLocaleString()} · {String(message.status).replace("_", " ")}</span>
+                        <span>{serverDate(message.created_at).toLocaleString()} · {String(message.status).replace("_", " ")}</span>
                       </div>
                       <div className="mb-2 text-xs font-semibold text-[#e6edf3]">{message.subject || "(No Subject)"}</div>
                       <div className="text-xs text-[#c9d1d9] whitespace-pre-wrap leading-relaxed font-sans">{message.body_text}</div>
