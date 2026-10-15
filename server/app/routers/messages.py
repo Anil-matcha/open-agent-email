@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, update
 
 from app.database import get_db
-from app.models import Agent, EmailTemplate, Message, MessageAttachment, OutboundJob, OutboundRetryEvent, ReviewItem, SmtpConfig
+from app.models import Agent, EmailTemplate, Message, MessageAttachment, MessageLifecycleEntry, OutboundJob, OutboundRetryEvent, ReviewItem, SmtpConfig
 from app.schemas import MessageResponse, MessagePageResponse, MessageAttachmentResponse, MessageLabelsUpdate, MessageSendRequest, MessageReplyRequest, MessageForwardRequest, RecentOtpResponse
 from app.services.email_service import EmailService
 from app.services.attachment_utils import decode_attachment_inputs
@@ -422,7 +422,27 @@ async def get_message_lifecycle(email: str, message_id: str, db: AsyncSession = 
     if message.deleted_at:
         events.append({"type": "trashed", "at": message.deleted_at, "detail": ""})
     events.sort(key=lambda e: (e["at"] is None, e["at"] or datetime.min))
-    return {"message_id": message.id, "status": message.status, "events": events}
+    ledger = list((await db.execute(
+        select(MessageLifecycleEntry).where(MessageLifecycleEntry.message_id == message.id)
+        .order_by(MessageLifecycleEntry.created_at, MessageLifecycleEntry.id)
+    )).scalars())
+    if ledger:
+        entries = [{"code": row.code, "at": row.created_at, "detail": row.detail or ""} for row in ledger]
+    else:
+        # Messages that predate the ledger: derive entries from their current state.
+        entries = [{"code": _derived_code(event["type"]), "at": event["at"], "detail": event.get("detail") or ""}
+                   for event in events]
+        if message.status in _DERIVED_STATUS_CODES and not any(e["code"] == message.status for e in entries):
+            entries.append({"code": message.status, "at": None, "detail": message.delivery_error or ""})
+    return {"message_id": message.id, "status": message.status, "events": events, "entries": entries}
+
+
+_DERIVED_STATUS_CODES = {"sending", "accepted_by_relay", "delivered", "delivery_unknown", "blocked", "failed", "canceled", "scheduled"}
+
+
+def _derived_code(event_type: str) -> str:
+    """Map a derived timeline event name onto the fixed ledger codes."""
+    return "queued" if event_type == "operator_retry" else event_type
 
 
 @router.get("/{message_id}/attachments", response_model=List[MessageAttachmentResponse])

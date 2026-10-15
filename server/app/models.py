@@ -1,6 +1,7 @@
 import datetime
 from sqlalchemy import Column, String, Boolean, Float, Text, DateTime, ForeignKey, Index, Integer, LargeBinary, UniqueConstraint, JSON, text
-from sqlalchemy.orm import relationship
+from sqlalchemy import event, inspect as sa_inspect
+from sqlalchemy.orm import Session, relationship
 from app.database import Base
 
 class Agent(Base):
@@ -307,7 +308,9 @@ class WebhookEndpoint(Base):
     __tablename__ = "webhook_endpoints"
 
     id = Column(String(64), primary_key=True, index=True)
-    agent_email = Column(String(255), ForeignKey("agents.email", ondelete="CASCADE"), nullable=False, index=True)
+    # NULL means an account-level endpoint that receives events for every inbox (or only those in inbox_emails).
+    agent_email = Column(String(255), ForeignKey("agents.email", ondelete="CASCADE"), nullable=True, index=True)
+    inbox_emails = Column(JSON, nullable=True)
     url = Column(Text, nullable=False)
     event_types = Column(JSON, nullable=False, default=lambda: ["*"])
     signing_secret = Column(Text, nullable=False)
@@ -416,3 +419,71 @@ class SmtpConfig(Base):
     enabled = Column(Boolean, default=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
+
+
+
+class MessageLifecycleEntry(Base):
+    """Append-only record of one state transition of a message."""
+    __tablename__ = "message_lifecycle_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_id = Column(String(64), nullable=False, index=True)
+    code = Column(String(32), nullable=False)
+    detail = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+
+# Fixed reason codes. Message.status values map to one code each. Review decisions are
+# written by HitlService.resolve_review (a compare-and-set core UPDATE this listener cannot see).
+LIFECYCLE_CODES = (
+    "created", "scheduled", "canceled", "queued", "review_requested", "review_approved", "review_rejected",
+    "sending", "accepted_by_relay", "delivered", "delivery_unknown", "blocked", "failed",
+    "provider_delivered", "provider_delayed", "provider_bounced", "provider_complained", "provider_rejected",
+    "trashed", "restored",
+)
+_STATUS_TO_CODE = {
+    "scheduled": "scheduled", "canceled": "canceled", "sending": "sending", "accepted_by_relay": "accepted_by_relay",
+    "delivered": "delivered", "delivery_unknown": "delivery_unknown", "blocked": "blocked", "failed": "failed",
+}
+
+
+def _history(obj, name):
+    attr = sa_inspect(obj).attrs[name]
+    return attr.history
+
+
+@event.listens_for(Session, "before_flush")
+def _record_lifecycle(session, flush_context, instances):
+    """Append ledger rows for message, review and job transitions staged in this flush."""
+    def add(message_id, code, detail=""):
+        session.add(MessageLifecycleEntry(message_id=message_id, code=code, detail=(detail or "")[:1000]))
+
+    for obj in list(session.new):
+        if isinstance(obj, Message):
+            add(obj.id, "created", f"{obj.direction} message recorded")
+            code = _STATUS_TO_CODE.get(obj.status or "")
+            if code:
+                add(obj.id, code, obj.delivery_error or "")
+        elif isinstance(obj, ReviewItem):
+            add(obj.message_id, "review_requested", obj.reason or "")
+        elif isinstance(obj, OutboundJob):
+            add(obj.message_id, "queued", "")
+    for obj in list(session.dirty):
+        if isinstance(obj, Message):
+            status = _history(obj, "status")
+            if status.has_changes() and status.added:
+                code = _STATUS_TO_CODE.get(status.added[0] or "")
+                if code:
+                    add(obj.id, code, obj.delivery_error or "")
+            provider = _history(obj, "provider_delivery_status")
+            if provider.has_changes() and provider.added and provider.added[0]:
+                value = provider.added[0]
+                add(obj.id, f"provider_{value}", obj.provider_delivery_error or "")
+            deleted = _history(obj, "deleted_at")
+            if deleted.has_changes() and deleted.added:
+                was_set = bool(deleted.deleted and deleted.deleted[0])
+                is_set = deleted.added[0] is not None
+                if is_set and not was_set:
+                    add(obj.id, "trashed")
+                elif was_set and not is_set:
+                    add(obj.id, "restored")

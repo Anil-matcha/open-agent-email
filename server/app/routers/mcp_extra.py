@@ -55,7 +55,7 @@ EXT_TOOLS = [
            "paged": {"type": "boolean", "default": False, "description": "Return {items,next_cursor}; set true on the first page and pass cursor on later pages."}}, ["agent_email"]),
     _tool("get_conversation", "Fetch every message in one thread, oldest first.",
           {**_EMAIL, "conversation_id": {"type": "string"}}, ["agent_email", "conversation_id"]),
-    _tool("get_message_lifecycle", "Chronological timeline of review, queueing, retries and provider delivery outcomes.",
+    _tool("get_message_lifecycle", "Chronological timeline of review, queueing, retries and provider delivery outcomes, plus the persisted ledger as `entries` with fixed `code` values.",
           _MSG, ["agent_email", "message_id"]),
     _tool("get_agent_metrics", "Message counts by direction/status plus unread and pending-review totals.",
           _EMAIL, ["agent_email"]),
@@ -456,9 +456,12 @@ async def _h_delete_agent_suppression(db, args, principal):
 
 async def _h_list_webhooks(db, args, principal):
     if not _page_requested(args):
-        return await webhooks.list_webhooks(args.get("agent_email"), _int(args, "limit", 100, 1, 200), db)
+        return await webhooks.list_webhooks(
+            agent_email=args.get("agent_email"), account_level=args.get("account_level"),
+            limit=_int(args, "limit", 100, 1, 200), db=db)
     return await webhooks.list_webhooks_page(
-        args.get("agent_email"), _int(args, "limit", 50, 1, 200), args.get("cursor"), db)
+        agent_email=args.get("agent_email"), account_level=args.get("account_level"),
+        limit=_int(args, "limit", 50, 1, 200), cursor=args.get("cursor"), db=db)
 
 
 async def _h_get_webhook(db, args, principal):
@@ -467,14 +470,14 @@ async def _h_get_webhook(db, args, principal):
 
 
 async def _h_create_webhook(db, args, principal):
-    payload = webhooks.WebhookCreate(**_fields(args, "agent_email", "url", "enabled", "events"))
-    request = _mcp_request(args, _json_request_body(args, "agent_email", "url", "enabled", "events"))
+    payload = webhooks.WebhookCreate(**_fields(args, "agent_email", "inboxes", "url", "enabled", "events"))
+    request = _mcp_request(args, _json_request_body(args, "agent_email", "inboxes", "url", "enabled", "events"))
     return _dump(await webhooks.create_webhook(payload, request, principal, db))  # includes the signing secret, shown only now
 
 
 async def _h_update_webhook(db, args, principal):
     _require(args, "webhook_id")
-    payload = webhooks.WebhookUpdate(**_fields(args, "url", "enabled", "events"))
+    payload = webhooks.WebhookUpdate(**_fields(args, "url", "enabled", "events", "inboxes"))
     return await webhooks.update_webhook(args["webhook_id"], payload, db)
 
 
@@ -702,14 +705,14 @@ _NEW_SPECS = [
      {**_AE, "contact_id": _ID}, ["agent_email", "contact_id"], "read", _h_get_contact),
     ("get_outreach_contact", "Fetch one contact follow-up record by engagement_id.",
      {**_AE, "engagement_id": _ID}, ["agent_email", "engagement_id"], "read", _h_get_outreach_contact),
-    ("list_webhooks", "Administrator only: list webhook endpoints, optionally for one inbox. Signing secrets are never returned.",
-     {**_AE, "limit": _limit(50, 200), "cursor": _ID, **_PAGED}, [], "admin", _h_list_webhooks),
+    ("list_webhooks", "Administrator only: list webhook endpoints, optionally for one inbox or only account-level ones. Signing secrets are never returned.",
+     {**_AE, "account_level": {"type": "boolean"}, "limit": _limit(50, 200), "cursor": _ID, **_PAGED}, [], "admin", _h_list_webhooks),
     ("get_webhook", "Administrator only: fetch one webhook endpoint (no secret).",
      _WH_ID, ["webhook_id"], "admin", _h_get_webhook),
-    ("create_webhook", "Administrator only: register an HTTPS webhook (port 443, public host) for an inbox. The signing secret is returned once, in this response only.",
-     {**_AE, "url": _ID, "enabled": {"type": "boolean"}, "events": _EVENTS, "idempotency_key": _ID}, ["agent_email", "url"], "admin", _h_create_webhook),
-    ("update_webhook", "Administrator only: change a webhook's url, enabled flag or event filter.",
-     {**_WH_ID, "url": _ID, "enabled": {"type": "boolean"}, "events": _EVENTS}, ["webhook_id"], "admin", _h_update_webhook),
+    ("create_webhook", "Administrator only: register an HTTPS webhook (port 443, public host) for an inbox, or omit agent_email for an account-level webhook that receives events for every inbox (optionally limited to the inboxes list). The signing secret is returned once, in this response only.",
+     {**_AE, "inboxes": {"type": "array", "items": _ID}, "url": _ID, "enabled": {"type": "boolean"}, "events": _EVENTS, "idempotency_key": _ID}, ["url"], "admin", _h_create_webhook),
+    ("update_webhook", "Administrator only: change a webhook's url, enabled flag, event filter or (account-level only) inbox filter.",
+     {**_WH_ID, "url": _ID, "enabled": {"type": "boolean"}, "events": _EVENTS, "inboxes": {"type": "array", "items": _ID}}, ["webhook_id"], "admin", _h_update_webhook),
     ("delete_webhook", "Administrator only: delete a webhook endpoint and its delivery history.",
      _WH_ID, ["webhook_id"], "admin", _h_delete_webhook),
     ("rotate_webhook_secret", "Administrator only: issue a new signing secret, returned once; the old one stays valid for 24 hours.",

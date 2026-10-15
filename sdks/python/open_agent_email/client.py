@@ -34,6 +34,19 @@ class Message(TypedDict, total=False):
     created_at: str
 
 
+class LifecycleEntry(TypedDict):
+    code: str
+    at: str | None
+    detail: str
+
+
+class MessageLifecycle(TypedDict):
+    message_id: str
+    status: str
+    events: list[dict[str, Any]]
+    entries: list[LifecycleEntry]
+
+
 class AgentTestSendResult(TypedDict):
     status: Literal["accepted", "pending_review"]
     message_id: str
@@ -328,6 +341,13 @@ def _format_metrics_time(value: datetime.datetime | str | None) -> str | None:
     return result
 
 
+class _Unset:
+    """Marks an argument that was not passed, so ``None`` can mean "clear"."""
+
+
+_UNSET = _Unset()
+
+
 class AgentEmailError(Exception):
     """An API or transport error. The bearer token is never included in errors."""
 
@@ -457,6 +477,8 @@ class AgentEmailClient:
         idempotency_key: str | None = None,
     ) -> Any:
         url = f"{self.base_url}{path}"
+        # Unset options must not be sent: urlencode would turn None into the text "None".
+        query = {key: value for key, value in (query or {}).items() if value is not None}
         if query:
             url += "?" + urlencode(query)
         headers = {"Authorization": f"Bearer {self._api_key}", "Accept": "application/json"}
@@ -1162,7 +1184,7 @@ class AgentEmailClient:
     def restore_message(self, inbox: str, message_id: str) -> Message:
         return self._request("POST", f"{self._message_path(inbox, message_id)}/restore")
 
-    def get_message_lifecycle(self, inbox: str, message_id: str) -> dict[str, Any]:
+    def get_message_lifecycle(self, inbox: str, message_id: str) -> MessageLifecycle:
         return self._request("GET", f"{self._message_path(inbox, message_id)}/lifecycle")
 
     def forward_message(self, inbox: str, message_id: str, *, recipient: str, note: str | None = None) -> Message:
@@ -1242,18 +1264,51 @@ class AgentEmailClient:
         """Revoke a canonical account or inbox key."""
         return self._request("DELETE", f"/v1/account/api-keys/{quote(key_id, safe='')}", query={"confirm": "DELETE"})
 
-    def list_webhooks(self, *, agent_email: str | None = None) -> list[dict[str, Any]]:
-        query = {"agent_email": agent_email} if agent_email else None
-        return self._request("GET", "/v1/webhooks", query=query)
+    def list_webhooks(self, *, agent_email: str | None = None, account_level: bool | None = None) -> list[dict[str, Any]]:
+        query: dict[str, Any] = {}
+        if agent_email:
+            query["agent_email"] = agent_email
+        if account_level is not None:
+            query["account_level"] = "true" if account_level else "false"
+        return self._request("GET", "/v1/webhooks", query=query or None)
 
     def create_webhook(
-        self, agent_email: str, url: str, *, events: list[str] | None = None, enabled: bool = True,
+        self, agent_email: str | None, url: str, *, events: list[str] | None = None, enabled: bool = True,
+        inboxes: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Create an endpoint. The response contains the signing secret exactly once."""
-        return self._request(
-            "POST", "/v1/webhooks",
-            payload={"agent_email": agent_email, "url": url, "enabled": enabled, "events": events or ["*"]},
-        )
+        """Create an endpoint. The response contains the signing secret exactly once.
+
+        Pass ``agent_email=None`` for an account-level endpoint that receives events for every inbox,
+        optionally limited to ``inboxes``.
+        """
+        payload: dict[str, Any] = {"url": url, "enabled": enabled, "events": events or ["*"]}
+        if agent_email is not None:
+            payload["agent_email"] = agent_email
+        if inboxes is not None:
+            payload["inboxes"] = inboxes
+        return self._request("POST", "/v1/webhooks", payload=payload)
+
+    def create_account_webhook(
+        self, url: str, *, events: list[str] | None = None, enabled: bool = True, inboxes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create an account-level endpoint (administrator key); the signing secret is returned once."""
+        return self.create_webhook(None, url, events=events, enabled=enabled, inboxes=inboxes)
+
+    def update_webhook(
+        self, endpoint_id: str, *, url: str | None = None, enabled: bool | None = None,
+        events: list[str] | None = None, inboxes: list[str] | None | _Unset = _UNSET,
+    ) -> dict[str, Any]:
+        """Change an endpoint. ``inboxes=None`` clears an account-level inbox filter; leave it out to keep it."""
+        payload: dict[str, Any] = {}
+        if url is not None:
+            payload["url"] = url
+        if enabled is not None:
+            payload["enabled"] = enabled
+        if events is not None:
+            payload["events"] = events
+        if not isinstance(inboxes, _Unset):
+            payload["inboxes"] = inboxes
+        return self._request("PATCH", f"/v1/webhooks/{quote(endpoint_id, safe='')}", payload=payload)
 
     def test_webhook(self, endpoint_id: str) -> dict[str, Any]:
         return self._request("POST", f"/v1/webhooks/{quote(endpoint_id, safe='')}/test")
@@ -1346,11 +1401,15 @@ class AgentEmailClient:
     def iter_reviews(self, *, status: Literal["pending", "approved", "rejected"] | None = None, agent_email: str | None = None, limit: int = 50):
         return self._iterate_pages(lambda **kw: self.get_reviews_page(**kw), status=status, agent_email=agent_email, limit=limit)
 
-    def get_webhooks_page(self, *, agent_email: str | None = None, limit: int = 50, cursor: str | None = None) -> Page:
-        return self._request("GET", "/v1/webhooks/page", query={"agent_email": agent_email, "limit": limit, "cursor": cursor})
+    def get_webhooks_page(self, *, agent_email: str | None = None, account_level: bool | None = None,
+                          limit: int = 50, cursor: str | None = None) -> Page:
+        level = None if account_level is None else ("true" if account_level else "false")
+        return self._request("GET", "/v1/webhooks/page", query={
+            "agent_email": agent_email, "account_level": level, "limit": limit, "cursor": cursor})
 
-    def iter_webhooks(self, *, agent_email: str | None = None, limit: int = 50):
-        return self._iterate_pages(lambda **kw: self.get_webhooks_page(**kw), agent_email=agent_email, limit=limit)
+    def iter_webhooks(self, *, agent_email: str | None = None, account_level: bool | None = None, limit: int = 50):
+        return self._iterate_pages(lambda **kw: self.get_webhooks_page(**kw), agent_email=agent_email,
+                                   account_level=account_level, limit=limit)
 
     def get_domains_page(self, *, limit: int = 50, cursor: str | None = None) -> Page:
         return self._request("GET", "/v1/domains/page", query={"limit": limit, "cursor": cursor})

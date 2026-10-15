@@ -4,7 +4,7 @@ import datetime
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import WebhookDelivery, WebhookEndpoint
@@ -29,15 +29,24 @@ def build_payload(event_type: str, flat: dict[str, Any], *, data_exclude: tuple[
     }
 
 
+def _wants_event(endpoint: WebhookEndpoint, event_type: str) -> bool:
+    return not endpoint.event_types or "*" in endpoint.event_types or event_type in endpoint.event_types
+
+
 async def _subscribed_endpoints(db: AsyncSession, agent_email: str, event_type: str) -> list[WebhookEndpoint]:
+    """Enabled, subscribed endpoints for one inbox: its own, plus account-level ones covering it."""
     endpoints = (await db.execute(select(WebhookEndpoint).where(
-        WebhookEndpoint.agent_email == agent_email,
+        or_(WebhookEndpoint.agent_email == agent_email, WebhookEndpoint.agent_email.is_(None)),
         WebhookEndpoint.enabled.is_(True),
     ))).scalars().all()
     return [
         endpoint for endpoint in endpoints
-        if not endpoint.event_types or "*" in endpoint.event_types or event_type in endpoint.event_types
+        if _wants_event(endpoint, event_type)
+        and (endpoint.agent_email is not None or not endpoint.inbox_emails or agent_email in endpoint.inbox_emails)
     ]
+
+
+subscribed_endpoints = _subscribed_endpoints
 
 
 async def enqueue_email_webhook_event(
@@ -214,7 +223,7 @@ def _queue(db: AsyncSession, endpoint: WebhookEndpoint, event_type: str, flat: d
     db.add(WebhookDelivery(
         id=flat["id"],
         endpoint_id=endpoint.id,
-        agent_email=endpoint.agent_email,
+        agent_email=endpoint.agent_email or flat.get("agent_email") or "",
         event_type=event_type,
         payload=build_payload(event_type, flat),
         status="pending",
@@ -287,11 +296,14 @@ async def enqueue_domain_webhook_event(
     goes to every enabled, subscribed endpoint whose inbox address is on that domain.
     """
     endpoints = (await db.execute(select(WebhookEndpoint).where(
-        WebhookEndpoint.agent_email.like(f"%@{domain}"),
+        or_(WebhookEndpoint.agent_email.like(f"%@{domain}"), WebhookEndpoint.agent_email.is_(None)),
         WebhookEndpoint.enabled.is_(True),
     ))).scalars().all()
     for endpoint in endpoints:
-        if endpoint.event_types and "*" not in endpoint.event_types and event_type not in endpoint.event_types:
+        if not _wants_event(endpoint, event_type):
+            continue
+        if endpoint.agent_email is None and endpoint.inbox_emails and not any(
+                str(item).endswith(f"@{domain}") for item in endpoint.inbox_emails):
             continue
         _queue(db, endpoint, event_type, {
             "id": f"evt_{uuid.uuid4().hex}",

@@ -65,10 +65,11 @@ export interface TemplatePreview { subject: string; body_text: string; body_html
 export interface Conversation { id: string; subject: string; message_count: number; unread_count: number; participants: string[]; labels: string[]; last_message_at: string; last_message_id: string }
 export interface ConversationDetail extends Conversation { messages: Message[] }
 export interface LifecycleEvent { type: string; at: string | null; detail: string; [extra: string]: unknown }
-export interface Lifecycle { message_id: string; status: string; events: LifecycleEvent[] }
+export interface LifecycleEntry { code: string; at: string | null; detail: string }
+export interface Lifecycle { message_id: string; status: string; events: LifecycleEvent[]; entries: LifecycleEntry[] }
 export interface Review { id: string; message_id: string; agent_email: string; reason: string; threat_score: number; status: "pending" | "approved" | "rejected"; reviewer_notes: string | null; reviewed_by?: string | null; created_at: string; resolved_at: string | null; message?: Message }
 export interface OutboundJob { id: string; message_id: string; status: string; attempts: number; available_at: string; last_error: string | null; created_at: string; [extra: string]: unknown }
-export interface Webhook { id: string; agent_email: string; url: string; enabled: boolean; events: string[]; created_at: string; updated_at: string }
+export interface Webhook { id: string; agent_email: string | null; account_level: boolean; inboxes: string[] | null; url: string; enabled: boolean; events: string[]; created_at: string; updated_at: string }
 export interface WebhookCreated extends Webhook { signing_secret: string }
 export interface WebhookDelivery { id: string; endpoint_id: string; agent_email: string; event_type: string; payload: Record<string, unknown>; status: string; attempts: number; last_error: string | null; created_at: string; delivered_at: string | null; replayed_by?: string | null; replayed_at?: string | null; replay_count?: number }
 export interface Agent { id: string; email: string; display_name: string; description: string; status: string; threat_sensitivity: string; hitl_enabled: boolean; auto_reply_enabled: boolean; auto_reply_prompt: string; created_at: string; updated_at: string }

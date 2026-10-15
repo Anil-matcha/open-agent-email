@@ -29,6 +29,7 @@ from app.services.webhook_events import (
     build_payload,
     enqueue_email_webhook_event,
     enqueue_inbound_security_webhook_event,
+    subscribed_endpoints,
 )
 from app.services.attachment_utils import validate_composed_message_size
 from app.services.attachment_scan import scan_attachments
@@ -513,10 +514,7 @@ class EmailService:
         # Snapshot only the notification metadata. The event is committed atomically
         # with the inbound message; webhook network I/O runs in its own worker.
         if status == "delivered":
-            endpoints = (await db.execute(select(WebhookEndpoint).where(
-                WebhookEndpoint.agent_email == agent.email,
-                WebhookEndpoint.enabled.is_(True),
-            ))).scalars().all()
+            endpoints = await subscribed_endpoints(db, agent.email, "email.received")
             event_metadata = {
                 "agent_email": agent.email,
                 "direction": "inbound",

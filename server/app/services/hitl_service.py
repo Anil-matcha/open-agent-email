@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from fastapi import HTTPException
 
-from app.models import ReviewItem, Message, OutboundJob
+from app.models import MessageLifecycleEntry, ReviewItem, Message, OutboundJob
 from app.services.ws_manager import ws_manager
 from app.services.webhook_events import (
     enqueue_email_received_webhook_event,
@@ -47,6 +47,9 @@ class HitlService:
             raise HTTPException(status_code=409, detail="Review was already resolved by another request")
 
         review = await db.get(ReviewItem, review_id)
+        db.add(MessageLifecycleEntry(
+            message_id=review.message_id, code="review_approved" if action == "approve" else "review_rejected",
+            detail=(reviewer_id or "")[:1000]))
         message = await db.get(Message, review.message_id)
         if message:
             deferred = (

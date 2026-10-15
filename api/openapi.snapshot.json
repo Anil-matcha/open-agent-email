@@ -3003,10 +3003,17 @@
       "WebhookCreate": {
         "properties": {
           "agent_email": {
-            "maxLength": 255,
-            "minLength": 3,
-            "title": "Agent Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Email"
           },
           "enabled": {
             "default": true,
@@ -3021,6 +3028,21 @@
             "title": "Events",
             "type": "array"
           },
+          "inboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inboxes"
+          },
           "url": {
             "maxLength": 2048,
             "minLength": 9,
@@ -3029,7 +3051,6 @@
           }
         },
         "required": [
-          "agent_email",
           "url"
         ],
         "title": "WebhookCreate",
@@ -3037,9 +3058,21 @@
       },
       "WebhookCreated": {
         "properties": {
+          "account_level": {
+            "default": false,
+            "title": "Account Level",
+            "type": "boolean"
+          },
           "agent_email": {
-            "title": "Agent Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Email"
           },
           "created_at": {
             "format": "date-time",
@@ -3060,6 +3093,20 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "inboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inboxes"
           },
           "signing_secret": {
             "title": "Signing Secret",
@@ -3077,7 +3124,6 @@
         },
         "required": [
           "id",
-          "agent_email",
           "url",
           "enabled",
           "events",
@@ -3090,9 +3136,21 @@
       },
       "WebhookResponse": {
         "properties": {
+          "account_level": {
+            "default": false,
+            "title": "Account Level",
+            "type": "boolean"
+          },
           "agent_email": {
-            "title": "Agent Email",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Email"
           },
           "created_at": {
             "format": "date-time",
@@ -3114,6 +3172,20 @@
             "title": "Id",
             "type": "string"
           },
+          "inboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inboxes"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -3126,7 +3198,6 @@
         },
         "required": [
           "id",
-          "agent_email",
           "url",
           "enabled",
           "events",
@@ -3163,6 +3234,21 @@
               }
             ],
             "title": "Events"
+          },
+          "inboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inboxes"
           },
           "url": {
             "anyOf": [
@@ -10142,6 +10228,24 @@
             }
           },
           {
+            "description": "true: only account-level endpoints",
+            "in": "query",
+            "name": "account_level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only account-level endpoints",
+              "title": "Account Level"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -10555,6 +10659,24 @@
                 }
               ],
               "title": "Agent Email"
+            }
+          },
+          {
+            "description": "true: only account-level endpoints",
+            "in": "query",
+            "name": "account_level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only account-level endpoints",
+              "title": "Account Level"
             }
           },
           {

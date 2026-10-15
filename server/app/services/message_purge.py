@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import (
-    Message, MessageAttachment, MessagePurgeLog, OutboundJob, OutboundRetryEvent, ReviewItem, ReviewLinkToken,
+    Message, MessageAttachment, MessageLifecycleEntry, MessagePurgeLog, OutboundJob, OutboundRetryEvent, ReviewItem, ReviewLinkToken,
 )
 
 logger = logging.getLogger("message_purge")
@@ -43,6 +43,7 @@ async def purge_message(db: AsyncSession, message: Message, *, purged_by: str, r
         await db.execute(delete(ReviewLinkToken).where(ReviewLinkToken.review_id.in_(review_ids)))
         await db.execute(delete(ReviewItem).where(ReviewItem.id.in_(review_ids)))
     await db.execute(delete(MessageAttachment).where(MessageAttachment.message_id == message_id))
+    await db.execute(delete(MessageLifecycleEntry).where(MessageLifecycleEntry.message_id == message_id))
     db.add(MessagePurgeLog(
         agent_email=agent_email, message_id=message_id, purged_by=purged_by[:128], reason=reason,
         purged_at=datetime.datetime.utcnow(),

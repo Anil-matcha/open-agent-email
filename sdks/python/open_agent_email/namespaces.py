@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .client import AgentEmailClient, Message, MessagePage, Page
+    from .client import AgentEmailClient, Message, MessageLifecycle, MessagePage, Page
 
 
 class Messages:
@@ -64,6 +64,10 @@ class Messages:
         if remove_labels is not None:
             payload["remove_labels"] = remove_labels
         return self._c._request("PATCH", self._c._message_path(inbox, message_id), payload=payload)
+
+    def lifecycle(self, inbox: str, message_id: str) -> "MessageLifecycle":
+        """The message timeline, including the persisted ``entries`` ledger with fixed ``code`` values."""
+        return self._c.get_message_lifecycle(inbox, message_id)
 
     def trash(self, inbox: str, message_id: str) -> "Message":
         return self._c.trash_message(inbox, message_id)
@@ -118,12 +122,27 @@ class Webhooks:
     def __init__(self, client: "AgentEmailClient"):
         self._c = client
 
-    def list(self, *, inbox: str | None = None) -> list[dict[str, Any]]:
-        return self._c.list_webhooks(agent_email=inbox)
+    def list(self, *, inbox: str | None = None, account_level: bool | None = None) -> list[dict[str, Any]]:
+        return self._c.list_webhooks(agent_email=inbox, account_level=account_level)
 
-    def create(self, inbox: str, *, url: str, event_types: list[str] | None = None, enabled: bool = True) -> dict[str, Any]:
-        """Create an endpoint; the response contains the signing secret exactly once."""
-        return self._c.create_webhook(inbox, url, events=event_types, enabled=enabled)
+    def create(self, inbox: str | None, *, url: str, event_types: list[str] | None = None, enabled: bool = True,
+               inboxes: list[str] | None = None) -> dict[str, Any]:
+        """Create an endpoint; the response contains the signing secret exactly once.
+
+        ``inbox=None`` makes an account-level endpoint, which may be limited to ``inboxes``.
+        """
+        return self._c.create_webhook(inbox, url, events=event_types, enabled=enabled, inboxes=inboxes)
+
+    def create_account(self, *, url: str, event_types: list[str] | None = None, enabled: bool = True,
+                       inboxes: list[str] | None = None) -> dict[str, Any]:
+        """Create an account-level endpoint that receives events for every inbox (or only ``inboxes``)."""
+        return self._c.create_account_webhook(url, events=event_types, enabled=enabled, inboxes=inboxes)
+
+    def update(self, webhook_id: str, **changes: Any) -> dict[str, Any]:
+        """Change ``url``, ``enabled``, ``event_types`` or (account-level only) ``inboxes``."""
+        if "event_types" in changes:
+            changes["events"] = changes.pop("event_types")
+        return self._c.update_webhook(webhook_id, **changes)
 
     def test(self, webhook_id: str) -> dict[str, Any]:
         return self._c.test_webhook(webhook_id)

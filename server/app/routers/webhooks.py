@@ -1,4 +1,4 @@
-"""Administrator-managed, inbox-scoped webhook endpoints and delivery history."""
+"""Administrator-managed webhook endpoints (per inbox or account-level) and delivery history."""
 
 import base64
 import binascii
@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,17 @@ def _validate_event_types(value: list[str]) -> list[str]:
     if invalid:
         raise ValueError(f"Unsupported webhook event type: {sorted(invalid)[0]}")
     return value
+
+
+def _normalize_inboxes(value: Optional[list[str]]) -> Optional[list[str]]:
+    if value is None:
+        return None
+    cleaned = [item.strip().lower() for item in value]
+    if any(not item or "@" not in item or len(item) > 255 for item in cleaned):
+        raise ValueError("inboxes must contain inbox email addresses")
+    if len(set(cleaned)) != len(cleaned):
+        raise ValueError("inboxes values must be unique")
+    return cleaned
 
 
 def _encode_delivery_cursor(
@@ -119,7 +130,10 @@ def _decode_delivery_cursor(
 
 
 class WebhookCreate(BaseModel):
-    agent_email: str = Field(min_length=3, max_length=255)
+    # Omit agent_email for an account-level endpoint that receives events for every inbox.
+    agent_email: Optional[str] = Field(None, min_length=3, max_length=255)
+    # Account-level only: restrict delivery to these inbox addresses.
+    inboxes: Optional[list[str]] = Field(None, max_length=100)
     url: str = Field(min_length=9, max_length=2048)
     enabled: bool = True
     events: list[str] = Field(default_factory=lambda: ["*"], max_length=32)
@@ -129,11 +143,28 @@ class WebhookCreate(BaseModel):
     def validate_events(cls, value: list[str]) -> list[str]:
         return _validate_event_types(value)
 
+    @field_validator("inboxes")
+    @classmethod
+    def validate_inboxes(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        return _normalize_inboxes(value)
+
+    @model_validator(mode="after")
+    def inbox_filter_needs_account_scope(self):
+        if self.agent_email is not None and self.inboxes is not None:
+            raise ValueError("inboxes can only be set on an account-level webhook (omit agent_email)")
+        return self
+
 
 class WebhookUpdate(BaseModel):
     url: Optional[str] = Field(None, min_length=9, max_length=2048)
     enabled: Optional[bool] = None
     events: Optional[list[str]] = Field(None, max_length=32)
+    inboxes: Optional[list[str]] = Field(None, max_length=100)
+
+    @field_validator("inboxes")
+    @classmethod
+    def validate_inboxes(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        return _normalize_inboxes(value)
 
     @field_validator("events")
     @classmethod
@@ -143,7 +174,9 @@ class WebhookUpdate(BaseModel):
 
 class WebhookResponse(BaseModel):
     id: str
-    agent_email: str
+    agent_email: Optional[str] = None
+    account_level: bool = False
+    inboxes: Optional[list[str]] = None
     url: str
     enabled: bool
     events: list[str]
@@ -158,7 +191,8 @@ class WebhookCreated(WebhookResponse):
 def _endpoint_response(endpoint: WebhookEndpoint) -> dict:
     parsed = urlsplit(endpoint.url)
     display_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "[redacted]" if parsed.query else "", ""))
-    return {"id": endpoint.id, "agent_email": endpoint.agent_email, "url": display_url,
+    return {"id": endpoint.id, "agent_email": endpoint.agent_email,
+            "account_level": endpoint.agent_email is None, "inboxes": endpoint.inbox_emails, "url": display_url,
             "enabled": endpoint.enabled, "events": endpoint.event_types or ["*"],
             "created_at": endpoint.created_at, "updated_at": endpoint.updated_at}
 
@@ -192,21 +226,36 @@ async def create_webhook(payload: WebhookCreate, request: Request,
             raise HTTPException(status_code=422 if decision.outcome == "conflict" else 409,
                                 detail=messages[decision.outcome])
 
-    agent_result = await db.execute(select(Agent).where(
-        Agent.email == payload.agent_email.strip().lower(),
-    ).with_for_update())
-    agent = agent_result.scalar_one_or_none()
-    if not agent:
-        if decision is not None:
-            await release_idempotency_claim(AsyncSessionLocal, decision)
-        raise HTTPException(status_code=404, detail="Agent inbox not found")
-    endpoint_count = await db.scalar(select(func.count()).select_from(WebhookEndpoint).where(
-        WebhookEndpoint.agent_email == agent.email,
-    ))
+    if payload.agent_email is None:
+        scope_agent = None
+        if payload.inboxes:
+            known = set((await db.execute(select(Agent.email).where(Agent.email.in_(payload.inboxes)))).scalars())
+            missing = [item for item in payload.inboxes if item not in known]
+            if missing:
+                if decision is not None:
+                    await release_idempotency_claim(AsyncSessionLocal, decision)
+                raise HTTPException(status_code=404, detail=f"Agent inbox not found: {missing[0]}")
+        endpoint_count = await db.scalar(select(func.count()).select_from(WebhookEndpoint).where(
+            WebhookEndpoint.agent_email.is_(None),
+        ))
+        limit_detail = f"An account can have at most {MAX_ENDPOINTS_PER_INBOX} account-level webhook endpoints"
+    else:
+        agent_result = await db.execute(select(Agent).where(
+            Agent.email == payload.agent_email.strip().lower(),
+        ).with_for_update())
+        scope_agent = agent_result.scalar_one_or_none()
+        if not scope_agent:
+            if decision is not None:
+                await release_idempotency_claim(AsyncSessionLocal, decision)
+            raise HTTPException(status_code=404, detail="Agent inbox not found")
+        endpoint_count = await db.scalar(select(func.count()).select_from(WebhookEndpoint).where(
+            WebhookEndpoint.agent_email == scope_agent.email,
+        ))
+        limit_detail = f"An inbox can have at most {MAX_ENDPOINTS_PER_INBOX} webhook endpoints"
     if endpoint_count >= MAX_ENDPOINTS_PER_INBOX:
         if decision is not None:
             await release_idempotency_claim(AsyncSessionLocal, decision)
-        raise HTTPException(status_code=409, detail=f"An inbox can have at most {MAX_ENDPOINTS_PER_INBOX} webhook endpoints")
+        raise HTTPException(status_code=409, detail=limit_detail)
     try:
         url = validate_webhook_url(payload.url)
         raw_secret = "whsec_" + secrets.token_urlsafe(32)
@@ -220,7 +269,8 @@ async def create_webhook(payload: WebhookCreate, request: Request,
             await release_idempotency_claim(AsyncSessionLocal, decision)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     now = datetime.datetime.utcnow()
-    endpoint = WebhookEndpoint(id=f"wh_{uuid.uuid4().hex}", agent_email=agent.email, url=url,
+    endpoint = WebhookEndpoint(id=f"wh_{uuid.uuid4().hex}", agent_email=scope_agent.email if scope_agent else None,
+                               inbox_emails=payload.inboxes or None, url=url,
                                signing_secret=encrypted, enabled=payload.enabled,
                                event_types=payload.events, created_at=now, updated_at=now)
     db.add(endpoint)
@@ -236,24 +286,30 @@ async def create_webhook(payload: WebhookCreate, request: Request,
 
 @router.get("")
 async def list_webhooks(agent_email: Optional[str] = Query(None, max_length=255),
+                        account_level: Optional[bool] = Query(None, description="true: only account-level endpoints"),
                         limit: int = Query(100, ge=1, le=200), db: AsyncSession = Depends(get_db)):
     query = select(WebhookEndpoint)
     if agent_email:
         query = query.where(WebhookEndpoint.agent_email == agent_email.strip().lower())
+    if account_level is not None:
+        query = query.where(WebhookEndpoint.agent_email.is_(None) if account_level else WebhookEndpoint.agent_email.is_not(None))
     endpoints = (await db.execute(query.order_by(WebhookEndpoint.created_at.desc()).limit(limit))).scalars().all()
     return [_endpoint_response(item) for item in endpoints]
 
 
 @router.get("/page")
 async def list_webhooks_page(agent_email: Optional[str] = Query(None, max_length=255),
+                             account_level: Optional[bool] = Query(None, description="true: only account-level endpoints"),
                              limit: int = Query(50, ge=1, le=200),
                              cursor: Optional[str] = Query(None, max_length=2048),
                              db: AsyncSession = Depends(get_db)):
     normalized_email = agent_email.strip().lower() if agent_email else None
-    scope = f"/v1/webhooks|agent_email={normalized_email or ''}"
+    scope = f"/v1/webhooks|agent_email={normalized_email or ''}|account_level={'' if account_level is None else int(account_level)}"
     query = select(WebhookEndpoint)
     if normalized_email:
         query = query.where(WebhookEndpoint.agent_email == normalized_email)
+    if account_level is not None:
+        query = query.where(WebhookEndpoint.agent_email.is_(None) if account_level else WebhookEndpoint.agent_email.is_not(None))
     if cursor:
         key, item_id = decode_cursor(cursor, scope=scope)
         try:
@@ -284,6 +340,10 @@ async def update_webhook(endpoint_id: str, payload: WebhookUpdate, db: AsyncSess
         endpoint.enabled = payload.enabled
     if payload.events is not None:
         endpoint.event_types = payload.events
+    if "inboxes" in payload.model_fields_set:
+        if endpoint.agent_email is not None and payload.inboxes is not None:
+            raise HTTPException(status_code=422, detail="inboxes can only be set on an account-level webhook")
+        endpoint.inbox_emails = payload.inboxes or None
     endpoint.updated_at = datetime.datetime.utcnow()
     await db.commit()
     await db.refresh(endpoint)
@@ -382,7 +442,7 @@ async def send_test_webhook(endpoint_id: str, db: AsyncSession = Depends(get_db)
     db.add(WebhookDelivery(
         id=delivery_id,
         endpoint_id=endpoint.id,
-        agent_email=endpoint.agent_email,
+        agent_email=endpoint.agent_email or "",
         event_type="webhook.test",
         payload=build_payload("webhook.test", {
             "id": delivery_id,

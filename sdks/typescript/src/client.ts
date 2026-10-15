@@ -348,16 +348,24 @@ export class AgentEmailClient {
   };
 
   readonly webhooks = {
-    list: (agentEmail?: string, limit?: number) => this.request<T.Webhook[]>("GET", "/v1/webhooks", { query: { agent_email: agentEmail, limit } }),
-    page: (params: { agent_email?: string; limit?: number; cursor?: string } = {}) => this.request<T.Page<T.Webhook>>("GET", "/v1/webhooks/page", { query: { ...params } }),
-    iterate: (params: Omit<{ agent_email?: string; limit?: number; cursor?: string }, "cursor"> = {}) => paginate<T.Webhook>((cursor) => this.webhooks.page({ ...params, cursor })),
+    list: (agentEmail?: string, limit?: number, accountLevel?: boolean) =>
+      this.request<T.Webhook[]>("GET", "/v1/webhooks", { query: { agent_email: agentEmail, limit, account_level: accountLevel } }),
+    page: (params: { agent_email?: string; account_level?: boolean; limit?: number; cursor?: string } = {}) => this.request<T.Page<T.Webhook>>("GET", "/v1/webhooks/page", { query: { ...params } }),
+    iterate: (params: Omit<{ agent_email?: string; account_level?: boolean; limit?: number; cursor?: string }, "cursor"> = {}) => paginate<T.Webhook>((cursor) => this.webhooks.page({ ...params, cursor })),
     get: (id: string) => this.request<T.Webhook>("GET", `/v1/webhooks/${seg(id)}`),
-    /** `event_types` is accepted as an alias for `events`. */
-    create: (input: { agent_email: string; url: string; enabled?: boolean; events?: string[]; event_types?: string[] }) => {
+    /**
+     * `event_types` is accepted as an alias for `events`. Leave `agent_email` out for an account-level
+     * endpoint that receives events for every inbox, optionally limited to `inboxes`.
+     */
+    create: (input: { agent_email?: string; inboxes?: string[]; url: string; enabled?: boolean; events?: string[]; event_types?: string[] }) => {
       const { event_types, ...rest } = input;
       return this.request<T.WebhookCreated>("POST", "/v1/webhooks", { body: { ...rest, events: rest.events ?? event_types } });
     },
-    update: (id: string, patch: { url?: string; enabled?: boolean; events?: string[] }) =>
+    /** Account-level endpoint (administrator key); the signing secret is returned once. */
+    createAccount: (input: { inboxes?: string[]; url: string; enabled?: boolean; events?: string[]; event_types?: string[] }) =>
+      this.webhooks.create(input),
+    /** `inboxes: null` clears an account-level inbox filter; leave it out to keep it. */
+    update: (id: string, patch: { url?: string; enabled?: boolean; events?: string[]; inboxes?: string[] | null }) =>
       this.request<T.Webhook>("PATCH", `/v1/webhooks/${seg(id)}`, { body: patch }),
     delete: (id: string) => this.request<void>("DELETE", `/v1/webhooks/${seg(id)}`),
     /** Returns the new secret; the previous one stays valid for 24 hours. */
