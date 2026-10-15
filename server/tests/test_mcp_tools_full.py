@@ -28,6 +28,7 @@ update_protection update_template update_webhook verify_domain whoami
 list_account_suppressions delete_account_suppression export_account list_account_contacts restore_agent
 get_review_settings get_review get_pending_message get_contact get_domain get_outreach_contact list_pending_messages
 approve_pending_message reject_pending_message list_agent_suppressions delete_suppression send_email
+get_server_settings update_server_settings get_server_readiness
 list_starter_templates get_starter_template validate_template copy_starter_template reject_message
 """.split())
 
@@ -43,6 +44,7 @@ ADMIN_TOOLS = {
     "register_domain", "verify_domain", "delete_domain", "get_account_metrics", "list_outbox",
     "retry_outbox_job", "list_account_suppressions", "delete_account_suppression", "export_account", "get_domain",
     "list_account_contacts", "restore_agent", "get_review_settings",
+    "get_server_settings", "update_server_settings", "get_server_readiness",
 }
 INBOX_WRITE_TOOLS = {
     "send_message", "send_email", "reply_to_message", "forward_to_human", "forward_message", "update_message_labels", "delete_message",

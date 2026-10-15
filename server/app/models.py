@@ -422,6 +422,16 @@ class SmtpConfig(Base):
 
 
 
+class ServerSetting(Base):
+    """A server setting saved from the dashboard; it overrides the environment default."""
+    __tablename__ = "server_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(Text, nullable=False)  # JSON-encoded
+    updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_by = Column(String(64), nullable=False, default="admin")
+
+
 class MessageLifecycleEntry(Base):
     """Append-only record of one state transition of a message."""
     __tablename__ = "message_lifecycle_entries"

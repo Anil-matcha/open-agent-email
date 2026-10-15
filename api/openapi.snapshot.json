@@ -2753,6 +2753,21 @@
         "title": "ReviewItemResponse",
         "type": "object"
       },
+      "ServerSettingsUpdate": {
+        "properties": {
+          "values": {
+            "additionalProperties": true,
+            "description": "Setting key to new value. null removes the saved value so the environment default applies again.",
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "ServerSettingsUpdate",
+        "type": "object"
+      },
       "SmtpConfigResponse": {
         "properties": {
           "enabled": {
@@ -9903,6 +9918,81 @@
         "summary": "Reject Review",
         "tags": [
           "HITL Reviews"
+        ]
+      }
+    },
+    "/v1/settings": {
+      "get": {
+        "operationId": "list_server_settings_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Server Settings",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_server_settings_v1_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Server Settings",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/v1/settings/readiness": {
+      "get": {
+        "operationId": "server_readiness_v1_settings_readiness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Server Readiness",
+        "tags": [
+          "Settings"
         ]
       }
     },

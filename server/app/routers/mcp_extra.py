@@ -800,6 +800,24 @@ async def _h_restore_agent(db, args, principal):
     return _m(AgentResponse, await agents.restore_agent(args["agent_email"], db))
 
 
+async def _h_get_server_settings(db, args, principal):
+    from app.services import server_settings
+    return {"items": await server_settings.describe(db)}
+
+
+async def _h_update_server_settings(db, args, principal):
+    from app.routers.settings_admin import apply_update
+    values = args.get("values")
+    if not isinstance(values, dict):
+        raise ValueError("values must be an object of setting keys to new values")
+    return {"items": await apply_update(db, values, principal.principal_id or "admin")}
+
+
+async def _h_get_server_readiness(db, args, principal):
+    from app.services import server_settings
+    return await server_settings.readiness(db)
+
+
 async def _h_get_review_settings(db, args, principal):
     _require(args, "agent_email")
     return await meta.get_review_settings(args["agent_email"], db)
@@ -842,6 +860,12 @@ _MORE_SPECS = [
      _AE, ["agent_email"], "admin", _h_restore_agent),
     ("get_review_settings", "Administrator only: the inbox's review notification address, expiry window and expiry action.",
      _AE, ["agent_email"], "admin", _h_get_review_settings),
+    ("get_server_settings", "Administrator only: every server setting with its value and source (env, ui or default). Secrets show only whether they are configured, and settings that need a restart are read-only.",
+     {}, [], "admin", _h_get_server_settings),
+    ("update_server_settings", "Administrator only: save server settings such as PUBLIC_BASE_URL, SES_FEEDBACK_TOPIC_ARN or retention days. A null value removes the saved value so the environment default applies. The whole request is rejected if any value is invalid.",
+     {"values": {"type": "object"}}, ["values"], "admin", _h_update_server_settings),
+    ("get_server_readiness", "Administrator only: setup checklist (keys, mail listener, outgoing provider, public URL, verified domain, SES feedback) with a fix for each gap.",
+     {}, [], "admin", _h_get_server_readiness),
     ("list_starter_templates", "List the built-in starter email templates (verification code, password reset, welcome, receipt, and more).",
      {"limit": _limit(50, 200), "cursor": _ID, **_PAGED}, [], "any", _h_list_starter_templates),
     ("get_starter_template", "Fetch one starter template by alias with its body, variables and sample data.",

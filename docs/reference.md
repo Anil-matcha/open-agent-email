@@ -138,6 +138,24 @@ SQLite is the default for a single-process self-hosted setup. PostgreSQL can be 
 ---
 
 
+## Server settings
+
+The dashboard's **Settings > Server** tab, `GET`/`PUT /v1/settings` and the MCP tools `get_server_settings`, `update_server_settings` and `get_server_readiness` (administrator only) let you change the settings that are safe to change while the server runs. A value saved this way is stored in the database and takes priority over the environment, which takes priority over the built-in default. Saved values are applied immediately and again at every start.
+
+| Setting | What it controls |
+|---|---|
+| `PUBLIC_BASE_URL` | Public https address used for unsubscribe and review links. Must be a public https origin on port 443, with no credentials, query or fragment. Empty leaves the links out. |
+| `SHARED_DOMAIN`, `MAIL_HOSTNAME`, `SPF_INCLUDE` | Default domain, the host published as the MX target, and the SPF include for your relay. Hostnames only. |
+| `SES_FEEDBACK_TOPIC_ARN`, `SES_CONFIGURATION_SET` | Amazon SES feedback topic (an SNS ARN) and configuration set. Empty turns them off. |
+| `TRASH_RETENTION_DAYS`, `WEBHOOK_DELIVERY_RETENTION_DAYS` | Retention windows (0 to 3650 and 1 to 3650 days). |
+| `OUTBOUND_MAX_ATTACHMENTS`, `OUTBOUND_MAX_ATTACHMENT_BYTES`, `OUTBOUND_MAX_TOTAL_ATTACHMENT_BYTES`, `OUTBOUND_MAX_COMPOSED_BYTES` | Outgoing attachment and message size limits. A single attachment may not exceed the total. |
+
+`PUT /v1/settings` takes `{"values": {"KEY": value}}`. A `null` value removes the saved value so the environment or default applies again. Every value is validated, and one invalid value rejects the whole request. Each setting in the response reports its `value`, `source` (`ui`, `env` or `default`), type and limits.
+
+Some settings are shown but cannot be changed here: ports and bind addresses, the database URL (password hidden), the request rate limit, the request size cap and allowed origins are read when the server starts, so change them in the environment and restart. Secrets (`ADMIN_API_KEY`, `SMTP_CONFIG_ENCRYPTION_KEY`, `METRICS_TOKEN`, `ATTACHMENT_URL_SIGNING_KEY`) are never returned; the API only reports whether each is configured.
+
+`GET /v1/settings/readiness` returns a setup checklist: administrator key, encryption key, mail listener, outgoing mail provider, public URL, a verified domain and SES feedback. Each check is marked required, recommended or optional, and a failing one says how to fix it and where. The dashboard shows it at the top of the Server tab. Each save records who made it and when (`updated_by`, `updated_at`); changes are not written to the webhook event log.
+
 ## MCP tool catalog
 
 | Tool | Description |
@@ -159,12 +177,12 @@ SQLite is the default for a single-process self-hosted setup. PostgreSQL can be 
 | `approve_pending_message`, `reject_pending_message` | Resolve a pending review using the message ID. |
 | `approve_message`, `reject_message` | Compatibility names for review approval and rejection. |
 
-**93 tools in total** (`GET /mcp/tools` returns every schema). Beyond the table above, grouped by the credential each needs:
+**96 tools in total** (`GET /mcp/tools` returns every schema). Beyond the table above, grouped by the credential each needs:
 
 - **Any credential:** `whoami`.
 - **Inbox read scope** (`read_only` or `full_access` key for that inbox, or admin): `list_conversations`, `get_conversation`, `get_message_lifecycle`, `get_agent_metrics`, `get_protection`, `get_attachment` (metadata), `get_attachment_data` (base64, 5 MB cap), `list_templates`, `get_template`, `preview_template`, `list_contacts`, `get_contact`, `get_contact_consent`, `list_outreach_contacts`, `get_outreach_contact`, `list_suppressions`, `list_agent_suppressions`.
 - **Inbox write scope** (`full_access` key for that inbox, or admin): `update_message_labels`, `delete_message`, `restore_message`, `create_template`, `update_template`, `delete_template`, `create_contact`, `update_contact`, `delete_contact`, `import_contacts` (CSV text), `delete_contact_import`, `record_contact_consent`, `set_outreach_contact`, `delete_outreach_contact`, `create_agent_suppression`, `delete_agent_suppression`, `delete_suppression`. `send_message`, `send_email`, `reply_to_message`, `forward_message` and `forward_to_human` use the same inbox write scope.
-- **Administrator only:** `create_agent`, `get_agent`, `update_agent`, `delete_agent`, `update_protection`, `list_webhooks`, `get_webhook`, `create_webhook`, `update_webhook`, `delete_webhook`, `rotate_webhook_secret`, `test_webhook`, `list_webhook_deliveries`, `list_events`, `get_event`, `redeliver_event`, `list_api_keys`, `create_api_key`, `delete_api_key`, `list_domains`, `get_domain`, `register_domain`, `verify_domain`, `delete_domain`, `get_account_metrics`, `list_outbox`, `retry_outbox_job`.
+- **Administrator only:** `create_agent`, `get_agent`, `update_agent`, `delete_agent`, `update_protection`, `list_webhooks`, `get_webhook`, `create_webhook`, `update_webhook`, `delete_webhook`, `rotate_webhook_secret`, `test_webhook`, `list_webhook_deliveries`, `list_events`, `get_event`, `redeliver_event`, `list_api_keys`, `create_api_key`, `delete_api_key`, `list_domains`, `get_domain`, `register_domain`, `verify_domain`, `delete_domain`, `get_account_metrics`, `list_outbox`, `retry_outbox_job`, `get_server_settings`, `update_server_settings`, `get_server_readiness`.
 - **Reviewer keys** can call only `list_reviews`, `list_pending_messages`, `get_review`, `get_pending_message`, the review approval/rejection tools (`approve_review`, `reject_review`, `approve_pending_message`, `reject_pending_message`, `approve_message`, `reject_message`) and `whoami`.
 
 Webhook signing secrets and newly created API keys are returned once, in the response that creates or rotates them; reads never include them. Each tool runs the same code as its REST route, so validation, idempotency, suppression checks and approval rules are identical.

@@ -8,6 +8,7 @@ import asyncio
 from app.config import settings
 from app.database import engine, Base, AsyncSessionLocal
 from app.services.ws_manager import ws_manager
+from app.routers import settings_admin
 from app.routers import agents, messages, reviews, domains, settings_router, api_keys, mcp, stats, outbox, webhooks, contacts, suppressions, public_unsubscribe, templates, ses_feedback, engagements, conversations, meta, events
 from app.routers import account as account_router, starter_templates as starter_templates_router
 from app.routers import public_review
@@ -149,6 +150,9 @@ async def lifespan(app: FastAPI):
                     setattr(endpoint, attribute, encrypt_secret(plaintext, purpose))
         await db.commit()
     await run_migrations(migration_state)
+    async with AsyncSessionLocal() as settings_db:
+        from app.services.server_settings import load_overrides
+        await load_overrides(settings_db)
     logger.info("Database schema ready.")
 
     from app.services.outbound_worker import run_outbound_worker
@@ -179,6 +183,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not bind SMTP port 2525 on startup: {e}")
     app.state.smtp_server = smtp_server
+    from app.services.server_settings import set_listener_running
+    set_listener_running(smtp_server is not None)
 
     yield
 
@@ -308,6 +314,7 @@ app.include_router(meta.router)
 app.include_router(reviews.router)
 app.include_router(domains.router)
 app.include_router(settings_router.router)
+app.include_router(settings_admin.router)
 app.include_router(api_keys.router)
 app.include_router(api_keys.account_router)
 app.include_router(mcp.router)

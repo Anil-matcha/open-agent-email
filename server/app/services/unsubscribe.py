@@ -9,7 +9,12 @@ from app.config import settings
 
 
 def public_base_url() -> str | None:
-    value = settings.PUBLIC_BASE_URL.strip()
+    return normalize_public_base_url(settings.PUBLIC_BASE_URL)
+
+
+def normalize_public_base_url(value: str) -> str | None:
+    """Return the usable public HTTPS origin for `value`, or None when links must be omitted."""
+    value = value.strip()
     if not value or len(value) > 2048 or "\\" in value or any(ord(char) < 32 for char in value):
         return None
     try:
