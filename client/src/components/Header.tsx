@@ -13,8 +13,17 @@ export function Header() {
   const [authError, setAuthError] = useState("");
   const [connecting, setConnecting] = useState(false);
 
+  const [sharedDomain, setSharedDomain] = useState("");
+  const [docsUrl, setDocsUrl] = useState("/docs");
+
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" }).then((r) => setAuthenticated(r.ok)).catch(() => setAuthenticated(false));
+    fetch("/api/backend/health", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { shared_domain?: string } | null) => setSharedDomain(d?.shared_domain ?? ""))
+      .catch(() => setSharedDomain(""));
+    // Local development serves the dashboard on :3000 and the API on :8000; behind a proxy /docs is the API.
+    if (window.location.port === "3000") setDocsUrl(`${window.location.protocol}//${window.location.hostname}:8000/docs`);
   }, []);
 
   const connect = async (event: React.FormEvent) => {
@@ -102,20 +111,15 @@ export function Header() {
             <LogIn className="w-3.5 h-3.5" /> Connect dashboard
           </button>
         )}
-        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#30363d] bg-[#0d1117] text-xs text-[#8b949e]">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#2ea043]" />
-          <span className="font-mono text-[11px] text-[#e6edf3]">@agents.local</span>
-        </div>
-
-        <Link
-          href="/simulator"
-          className="px-3 py-1 rounded border border-[#30363d] bg-[#21262d] hover:bg-[#30363d] text-xs font-medium text-[#e6edf3] transition-colors"
-        >
-          Test Inbound
-        </Link>
+        {sharedDomain && (
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#30363d] bg-[#0d1117] text-xs text-[#8b949e]" title="Shared mail domain">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2ea043]" />
+            <span className="font-mono text-[11px] text-[#e6edf3]">@{sharedDomain}</span>
+          </div>
+        )}
 
         <a
-          href="http://127.0.0.1:8000/docs"
+          href={docsUrl}
           target="_blank"
           rel="noreferrer"
           className="p-1.5 rounded border border-[#30363d] text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d] transition-colors text-xs"
