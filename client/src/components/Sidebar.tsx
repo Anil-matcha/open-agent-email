@@ -11,19 +11,15 @@ import {
   Globe,
   Sliders,
   Key,
-  Bot,
   Cpu,
   Archive,
   Webhook,
   Users,
-  Ban,
   FileText,
-  CalendarClock,
   Activity,
   UserRound,
   Rocket,
   BarChart3,
-  Inbox,
   Server,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -111,8 +107,6 @@ export function Sidebar() {
           badgeTone: "review",
         },
         { name: "Outbox", href: "/outbox", icon: Archive },
-        { name: "Messages", href: "/inbox", icon: Inbox },
-        { name: "Agents", href: "/agents", icon: Bot },
       ],
     },
     {
@@ -126,9 +120,7 @@ export function Sidebar() {
       label: "Audience",
       items: [
         { name: "Contacts", href: "/contacts", icon: Users },
-        { name: "Follow-ups", href: "/engagements", icon: CalendarClock },
         { name: "Templates", href: "/templates", icon: FileText },
-        { name: "Suppressions", href: "/suppressions", icon: Ban },
       ],
     },
     {
