@@ -62,6 +62,18 @@ export function Header() {
         return { title: "Agent Directory", subtitle: "Manage email inboxes and policies" };
       case "/mcp":
         return { title: "MCP Integration", subtitle: "Connect Cursor and Claude Code" };
+      case "/metrics":
+        return { title: "Metrics", subtitle: "Delivery, authentication and review numbers" };
+      case "/get-started":
+        return { title: "Get started", subtitle: "Set up your first inbox" };
+      case "/inboxes":
+        return { title: "Inboxes", subtitle: "Mail, settings and activity for each inbox" };
+      case "/events":
+        return { title: "Event log", subtitle: "Everything the gateway sent to your webhooks" };
+      case "/account":
+        return { title: "Account", subtitle: "All inboxes, blocked recipients and export" };
+      case "/settings":
+        return { title: "Settings", subtitle: "Mail provider and server configuration" };
       default:
         return { title: "Dashboard", subtitle: "Open Agent Email Gateway" };
     }
