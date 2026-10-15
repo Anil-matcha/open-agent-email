@@ -66,6 +66,18 @@ class ConnectionManager:
                 logger.warning(f"Failed to broadcast WS message: {e}")
                 self.disconnect_broadcast(ws)
 
+    async def close_all(self, code: int, reason: str) -> None:
+        """Close every open socket, for example on shutdown, so clients know to reconnect."""
+        sockets = [ws for conns in self.agent_connections.values() for ws in conns]
+        sockets += list(self.broadcast_connections)
+        self.agent_connections.clear()
+        self.broadcast_connections.clear()
+        for ws in sockets:
+            try:
+                await ws.close(code=code, reason=reason)
+            except Exception as exc:
+                logger.debug("Could not close WebSocket during shutdown: %s", exc)
+
     def total_active_connections(self) -> int:
         agent_count = sum(len(conns) for conns in self.agent_connections.values())
         return agent_count + len(self.broadcast_connections)

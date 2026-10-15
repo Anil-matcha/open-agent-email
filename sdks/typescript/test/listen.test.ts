@@ -84,6 +84,32 @@ test("does not reconnect after a newer socket replaces this connection", async (
   assert.deepEqual(reasons, ["replaced"]);
 });
 
+test("does not reconnect after a policy rejection, but does after a server shutdown", async () => {
+  FakeSocket.instances = [];
+  const reasons: string[] = [];
+  const iterator = listen({
+    baseUrl: "http://h", apiKey: "k", agentEmail: "a@x.com", WebSocket: FakeSocket,
+    pingIntervalMs: 0, onDisconnect: (reason) => reasons.push(reason),
+  });
+  const pending = iterator.next();
+  await tick();
+  FakeSocket.instances[0]!.onclose?.({ code: 1008, reason: "not allowed" });
+  assert.equal((await pending).done, true);
+  assert.equal(FakeSocket.instances.length, 1);
+  assert.deepEqual(reasons, ["policy"]);
+
+  FakeSocket.instances = [];
+  const ac = new AbortController();
+  const again = listen({ baseUrl: "http://h", apiKey: "k", agentEmail: "a@x.com", WebSocket: FakeSocket, signal: ac.signal, pingIntervalMs: 0, reconnectMinMs: 5 });
+  const next = again.next();
+  await tick();
+  FakeSocket.instances[0]!.onclose?.({ code: 1001, reason: "shutting_down" });
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(FakeSocket.instances.length, 2);
+  ac.abort();
+  await next;
+});
+
 test("sends keep-alive pings while connected", async () => {
   FakeSocket.instances = [];
   const ac = new AbortController();

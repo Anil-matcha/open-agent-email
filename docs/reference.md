@@ -262,3 +262,19 @@ async def listen():
 
 asyncio.run(listen())
 ```
+
+### Connection close codes
+
+Each inbox has at most one live socket; a newer connection replaces the older one. The live stream is a push channel on top of the durable inbox and webhooks, so use webhooks if several consumers need the same mail.
+
+| Code | Reason | Meaning | What a client should do |
+|---|---|---|---|
+| `1000` | none | Normal close. | Stop. |
+| `1001` | `shutting_down` | The server is restarting. | Reconnect with backoff. |
+| `1006` | none (set locally) | Network drop. | Reconnect with backoff. |
+| `1008` | message | The connection was rejected by policy. | Do not reconnect. |
+| `1011` | `internal_error` | Server error while serving the socket. | Reconnect with backoff. |
+| `4000` | `replaced` | A newer connection for this inbox took over. | Do not reconnect; it would loop with the new one. |
+| `4001`-`4999` | varies | Reserved for terminal conditions. | Treat any unknown code in this range as terminal. |
+
+A missing or invalid key, or a key for a different inbox, is refused before the upgrade. The bundled `listen` clients (TypeScript SDK and `oae listen`) follow this table. The server does not send its own ping timeout; clients keep the connection alive by sending `ping`.

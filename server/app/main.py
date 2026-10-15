@@ -182,6 +182,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # 3. Shutdown
+    await ws_manager.close_all(code=1001, reason="shutting_down")
     if smtp_server:
         logger.info("Shutting down inbound SMTP listener...")
         smtp_server.close()

@@ -76,6 +76,7 @@ export async function* listen(opts: ListenOptions): AsyncGenerator<InboxEvent, v
       if (ev.code === 4000 && ev.reason === "replaced") { closed ??= "replaced"; terminal = true; }
       else if (typeof ev.code === "number" && ev.code >= 4000 && ev.code <= 4999) { closed ??= `terminal:${ev.code}`; terminal = true; }
       else if (ev.code === 1000) { closed ??= "normal"; terminal = true; }
+      else if (ev.code === 1008) { closed ??= "policy"; terminal = true; }
       else closed ??= "closed";
       notify();
     };

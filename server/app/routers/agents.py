@@ -155,3 +155,7 @@ async def agent_websocket_endpoint(websocket: WebSocket, email: str):
         ws_manager.disconnect_agent(email, websocket)
     except Exception:
         ws_manager.disconnect_agent(email, websocket)
+        try:
+            await websocket.close(code=1011, reason="internal_error")
+        except Exception:
+            pass
