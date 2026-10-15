@@ -1,0 +1,44 @@
+{
+  "description": "Golden webhook signing vectors shared by the server, TypeScript and Python tests. Webhook-Signature signs `<t>.<body>`; X-Webhook-Signature signs `<t>.<event id>.<body>`.",
+  "cases": [
+    {
+      "name": "single secret",
+      "timestamp": "1800000000",
+      "event_id": "evt_0123456789abcdef",
+      "event_type": "email.received",
+      "secrets": [
+        "whsec_golden_current"
+      ],
+      "body": "{\"id\":\"evt_0123456789abcdef\",\"message_id\":\"msg_abc\",\"agent_email\":\"bot@agents.local\",\"direction\":\"inbound\",\"sender\":\"a@example.com\",\"recipient\":\"bot@agents.local\",\"status\":\"delivered\",\"thread_id\":\"th_1\",\"created_at\":\"2027-01-15T08:00:00\",\"type\":\"email.received\",\"schema_version\":\"1\",\"data\":{\"message_id\":\"msg_abc\",\"agent_email\":\"bot@agents.local\",\"direction\":\"inbound\",\"sender\":\"a@example.com\",\"recipient\":\"bot@agents.local\",\"status\":\"delivered\",\"thread_id\":\"th_1\"}}",
+      "expected_headers": {
+        "X-Webhook-Event-Id": "evt_0123456789abcdef",
+        "X-Webhook-Timestamp": "1800000000",
+        "X-Webhook-Signature": "sha256=3ea0f2d9cff4c0704f0b30ab530e8b5779832884095d7dfd9deeedefb98f49c8",
+        "X-Webhook-Event": "email.received",
+        "Webhook-Signature": "t=1800000000,v1=bac3378c71b3c8968fa294b41abca0dd54f77923db277a7c9d6a674d5f6483fe",
+        "Webhook-Event-Type": "email.received",
+        "Webhook-Schema-Version": "1"
+      }
+    },
+    {
+      "name": "rotation overlap",
+      "timestamp": "1800000000",
+      "event_id": "evt_0123456789abcdef",
+      "event_type": "email.received",
+      "secrets": [
+        "whsec_golden_current",
+        "whsec_golden_previous"
+      ],
+      "body": "{\"id\":\"evt_0123456789abcdef\",\"message_id\":\"msg_abc\",\"agent_email\":\"bot@agents.local\",\"direction\":\"inbound\",\"sender\":\"a@example.com\",\"recipient\":\"bot@agents.local\",\"status\":\"delivered\",\"thread_id\":\"th_1\",\"created_at\":\"2027-01-15T08:00:00\",\"type\":\"email.received\",\"schema_version\":\"1\",\"data\":{\"message_id\":\"msg_abc\",\"agent_email\":\"bot@agents.local\",\"direction\":\"inbound\",\"sender\":\"a@example.com\",\"recipient\":\"bot@agents.local\",\"status\":\"delivered\",\"thread_id\":\"th_1\"}}",
+      "expected_headers": {
+        "X-Webhook-Event-Id": "evt_0123456789abcdef",
+        "X-Webhook-Timestamp": "1800000000",
+        "X-Webhook-Signature": "sha256=3ea0f2d9cff4c0704f0b30ab530e8b5779832884095d7dfd9deeedefb98f49c8,sha256=b173798d24775c3b74af0c9ce230add2e05faa556f90918cde07fda9bc9bb439",
+        "X-Webhook-Event": "email.received",
+        "Webhook-Signature": "t=1800000000,v1=bac3378c71b3c8968fa294b41abca0dd54f77923db277a7c9d6a674d5f6483fe,v1=32e618e25ba9a3632d85912a44f247258ff90a2b19a2f7be522bcb1b26c79245",
+        "Webhook-Event-Type": "email.received",
+        "Webhook-Schema-Version": "1"
+      }
+    }
+  ]
+}

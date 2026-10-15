@@ -1,0 +1,62 @@
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+      - "2525:2525"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - SMTP_HOST=0.0.0.0
+      - SMTP_PORT=2525
+      - DATA_DIR=/data
+      - DATABASE_URL=sqlite+aiosqlite:////data/open_agent_email.db
+      - SHARED_DOMAIN=agents.local
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      - SES_FEEDBACK_TOPIC_ARN=${SES_FEEDBACK_TOPIC_ARN:-}
+      # Generated once into the data volume when not provided here.
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - SMTP_CONFIG_ENCRYPTION_KEY=${SMTP_CONFIG_ENCRYPTION_KEY:-}
+      - SMTP_CONFIG_ENCRYPTION_KEY_PREVIOUS=${SMTP_CONFIG_ENCRYPTION_KEY_PREVIOUS:-}
+      - WEBHOOK_DELIVERY_RETENTION_DAYS=${WEBHOOK_DELIVERY_RETENTION_DAYS:-30}
+      - ATTACHMENT_SCAN_ENABLED=${ATTACHMENT_SCAN_ENABLED:-false}
+      - ATTACHMENT_SCAN_HOST=${ATTACHMENT_SCAN_HOST:-clamav}
+      - ATTACHMENT_SCAN_PORT=${ATTACHMENT_SCAN_PORT:-3310}
+      - ATTACHMENT_SCAN_TIMEOUT_SECONDS=${ATTACHMENT_SCAN_TIMEOUT_SECONDS:-15}
+      - ATTACHMENT_SCAN_MAX_BYTES=${ATTACHMENT_SCAN_MAX_BYTES:-26214400}
+      - ATTACHMENT_SCAN_MAX_CONCURRENT=${ATTACHMENT_SCAN_MAX_CONCURRENT:-4}
+      - ATTACHMENT_SCAN_CHUNK_BYTES=${ATTACHMENT_SCAN_CHUNK_BYTES:-65536}
+    volumes:
+      - oae-data:/data
+
+  clamav:
+    image: clamav/clamav:1.4.3
+    profiles: ["attachment-scan"]
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+    expose:
+      - "3310"
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - API_URL=http://server:8000
+    depends_on:
+      - server
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025" # SMTP port
+      - "8025:8025" # Web UI
+
+volumes:
+  oae-data:
+  clamav-signatures:

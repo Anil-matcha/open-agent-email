@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-agent-email"
+version = "0.2.0"
+description = "Dependency-free Python client and `oae` CLI for Open Agent Email"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Open Agent Email contributors" }]
+
+[project.optional-dependencies]
+listen = ["websockets>=12"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+oae = "open_agent_email.cli:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["open_agent_email*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,4 +1,34 @@
-PROJECT_STATUS.md
-CLAUDE.md
-AGENTS.md
-scripts/sync-internal.sh
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+server/.venv/
+backend/.venv/
+.venv/
+env/
+venv/
+*.db
+*.sqlite3
+
+# Node / Next.js
+client/node_modules/
+client/.next/
+client/out/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+node_modules/
+.next/
+out/
+.DS_Store
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env*.local
+.claude/
+*.egg-info/
