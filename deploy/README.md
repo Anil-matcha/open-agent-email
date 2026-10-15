@@ -14,7 +14,7 @@ A production example for one Linux host with Docker and nginx. The API and dashb
    ```
 
 2. DNS: an `A` record for the host, and an `MX` record for the mail domain pointing at it.
-3. nginx: copy `deploy/nginx/email.conf`, replace `SERVER_NAME` (the file lists one `map` directive your `nginx.conf` needs once, for WebSockets), get a certificate with certbot, then `nginx -t && systemctl reload nginx`.
+3. nginx: copy `deploy/nginx/email.conf`, replace `SERVER_NAME` (the file lists one `map` directive your `nginx.conf` needs once, for WebSockets), get a certificate with certbot, then `nginx -t && systemctl reload nginx`. `deploy.sh` does not touch nginx.
 4. Deploy: `DEPLOY_HOST=ubuntu@<ip> DEPLOY_KEY=<key> deploy/deploy.sh`. The first start prints the admin key once in the server log: `docker compose -f deploy/docker-compose.prod.yml logs server | grep "Admin key"`.
 5. Backups: install the cron line from `deploy/backup/oae-backup.sh` and copy the backup directory off the host. Keep `secrets.env`: the encryption key protects stored credentials.
 6. Open TCP 25 in the firewall or security group to receive mail from the internet. Cloud providers often block outbound port 25, so send through a relay.
