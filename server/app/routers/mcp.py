@@ -13,6 +13,7 @@ from app.services.attachment_utils import decode_attachment_inputs
 from app.services.hitl_service import HitlService
 from app.services.otp_finder import find_recent_otp
 from app.security import Principal, get_principal
+from app.tenancy import DEFAULT_TENANT_ID
 from app.schemas import ReviewDecisionRequest, normalize_send_at
 from app.routers import reviews as reviews_router
 from app.routers import agents as agents_router, messages as messages_router
@@ -327,6 +328,10 @@ async def mcp_rpc_handler(request: Request, db: AsyncSession = Depends(get_db), 
         "error": {"code": -32601, "message": f"Method {method} not found"}
     }
 
+# Tools that read or change settings shared by the whole server.
+OPERATOR_TOOLS = {"get_server_settings", "update_server_settings", "get_server_readiness"}
+
+
 async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: Principal) -> str:
     original_name = name
     name = _MCP_ALIASES.get(name, name)
@@ -341,6 +346,8 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         raise PermissionError("Reviewer credentials are limited to review tools")
     if name in admin_tools and not principal.is_admin:
         raise PermissionError("Administrator token required")
+    if name in OPERATOR_TOOLS and principal.tenant_id != DEFAULT_TENANT_ID:
+        raise PermissionError("Server operator credential required")
     if name in review_tools and not principal.is_admin and principal.scope != "reviewer":
         raise PermissionError("Reviewer credential required")
     if name in write_tools and not principal.is_admin and principal.scope != "full_access":

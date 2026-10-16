@@ -15,8 +15,8 @@ async def test_new_agent_socket_closes_previous_with_replaced_code():
     new.accept = AsyncMock()
     new.close = AsyncMock()
 
-    await manager.connect_agent("a@agents.local", old)
-    await manager.connect_agent("a@agents.local", new)
+    await manager.connect_agent("a@agents.local", old, "default")
+    await manager.connect_agent("a@agents.local", new, "default")
 
     old.close.assert_awaited_once_with(code=4000, reason="replaced")
     assert manager.agent_connections["a@agents.local"] == {new}
@@ -33,8 +33,8 @@ async def test_close_all_sends_shutdown_code_to_every_socket_and_continues_past_
         ws.accept = AsyncMock()
         ws.close = AsyncMock()
         sockets.append(ws)
-    await manager.connect_agent("a@agents.local", sockets[0])
-    await manager.connect_agent("b@agents.local", sockets[1])
+    await manager.connect_agent("a@agents.local", sockets[0], "default")
+    await manager.connect_agent("b@agents.local", sockets[1], "default")
     await manager.connect_broadcast(sockets[2], "default")
     sockets[0].close.side_effect = RuntimeError("already gone")
 

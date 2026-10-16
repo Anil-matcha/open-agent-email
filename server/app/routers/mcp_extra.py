@@ -571,7 +571,7 @@ async def _h_delete_domain(db, args, principal):
 async def _h_create_agent(db, args, principal):
     payload = AgentCreate(**_fields(args, "email", "display_name", "description", "threat_sensitivity",
                                     "hitl_enabled", "auto_reply_enabled", "auto_reply_prompt"))
-    return _m(AgentResponse, await agents.create_agent(payload, db))
+    return _m(AgentResponse, await agents.create_agent(payload, principal, db))
 
 
 async def _h_get_agent(db, args, principal):

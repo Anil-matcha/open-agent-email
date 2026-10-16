@@ -111,6 +111,13 @@ async def require_admin(principal: Principal = Depends(get_principal)) -> Princi
     return principal
 
 
+async def require_operator(principal: Principal = Depends(require_admin)) -> Principal:
+    """The server operator: administrator of the default tenant. Guards settings that are global to the server."""
+    if principal.tenant_id != DEFAULT_TENANT_ID:
+        raise HTTPException(status_code=403, detail="Server operator credential required")
+    return principal
+
+
 async def require_reviewer(principal: Principal = Depends(get_principal)) -> Principal:
     if not principal.is_admin and principal.scope != "reviewer":
         raise HTTPException(status_code=403, detail="Reviewer credential required")

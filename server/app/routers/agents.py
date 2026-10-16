@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
 from app.database import get_db
-from app.models import Agent
+from app.models import Agent, Domain
+from app.tenancy import UNSCOPED
 from app.schemas import AgentCreate, AgentUpdate, AgentResponse
 from app.services.ws_manager import ws_manager
-from app.security import require_admin
+from app.security import Principal, require_admin
 from app.security import authenticate_token
 from app.database import AsyncSessionLocal
 from app.services.cursors import decode_cursor, encode_cursor
@@ -52,10 +53,19 @@ async def list_agents_page(
     return {"items": [AgentResponse.model_validate(row) for row in rows], "next_cursor": next_cursor}
 
 @router.post("", response_model=AgentResponse, status_code=201)
-async def create_agent(agent_in: AgentCreate, db: AsyncSession = Depends(get_db)):
+async def create_agent(agent_in: AgentCreate, principal: Principal = Depends(require_admin),
+                       db: AsyncSession = Depends(get_db)):
     # Check if email taken
-    res = await db.execute(select(Agent).where(Agent.email == agent_in.email))
+    # Addresses are unique across all tenants, so this check looks past the tenant filter and
+    # answers the same way whoever owns the address.
+    res = await db.execute(select(Agent.id).where(Agent.email == agent_in.email).execution_options(**UNSCOPED))
     if res.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Agent with this email already exists")
+    # A domain registered by another tenant is that tenant's namespace.
+    address_domain = agent_in.email.rpartition("@")[2].lower()
+    domain_owner = await db.scalar(
+        select(Domain.tenant_id).where(Domain.domain == address_domain).execution_options(**UNSCOPED))
+    if domain_owner is not None and domain_owner != principal.tenant_id:
         raise HTTPException(status_code=400, detail="Agent with this email already exists")
 
     agent_id = f"ag_{uuid.uuid4().hex[:10]}"
@@ -143,10 +153,12 @@ async def agent_websocket_endpoint(websocket: WebSocket, email: str):
         except HTTPException:
             await websocket.close(code=1008)
             return
-    if not principal.is_admin and principal.agent_email != email:
+        # The session is bound to the principal's tenant, so another tenant's inbox is simply not found.
+        inbox_exists = await db.scalar(select(Agent.id).where(Agent.email == email))
+    if not inbox_exists or (not principal.is_admin and principal.agent_email != email):
         await websocket.close(code=1008)
         return
-    await ws_manager.connect_agent(email, websocket)
+    await ws_manager.connect_agent(email, websocket, principal.tenant_id)
     try:
         while True:
             # Keep-alive ping/pong

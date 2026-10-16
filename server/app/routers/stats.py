@@ -5,13 +5,13 @@ from sqlalchemy import select, func
 from app.database import get_db
 from app.models import Agent, Message, ReviewItem, SecurityEvent
 from app.schemas import StatsResponse
-from app.security import require_admin
+from app.security import Principal, require_admin
 from app.services.ws_manager import ws_manager
 
 router = APIRouter(prefix="/v1/stats", tags=["Stats"], dependencies=[Depends(require_admin)])
 
 @router.get("", response_model=StatsResponse)
-async def get_overview_stats(db: AsyncSession = Depends(get_db)):
+async def get_overview_stats(principal: Principal = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     agents_count = (await db.execute(select(func.count(Agent.id)))).scalar() or 0
     total_messages = (await db.execute(select(func.count(Message.id)))).scalar() or 0
     inbound_count = (await db.execute(select(func.count(Message.id)).where(Message.direction == "inbound"))).scalar() or 0
@@ -24,7 +24,7 @@ async def get_overview_stats(db: AsyncSession = Depends(get_db)):
     )).scalar() or 0
     pending_reviews = (await db.execute(select(func.count(ReviewItem.id)).where(ReviewItem.status == "pending"))).scalar() or 0
     threats_count = (await db.execute(select(func.count(SecurityEvent.id)))).scalar() or 0
-    active_ws = ws_manager.total_active_connections()
+    active_ws = ws_manager.total_active_connections(principal.tenant_id)
 
     return StatsResponse(
         total_agents=agents_count,

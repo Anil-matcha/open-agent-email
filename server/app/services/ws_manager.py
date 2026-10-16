@@ -18,13 +18,17 @@ class ConnectionManager:
         # global dashboard listeners
         # websocket -> tenant it may see; a feed never carries another tenant's events
         self.broadcast_connections: Dict[WebSocket, str] = {}
+        self._agent_socket_tenants: Dict[WebSocket, str] = {}
 
-    async def connect_agent(self, email: str, websocket: WebSocket):
+    async def connect_agent(self, email: str, websocket: WebSocket, tenant_id: str):
         await websocket.accept()
         # One live socket per inbox. A replacement is terminal for the older
         # client so its reconnect loop cannot steal the connection back.
         previous = self.agent_connections.pop(email, set())
         self.agent_connections[email] = {websocket}
+        self._agent_socket_tenants[websocket] = tenant_id
+        for old in previous:
+            self._agent_socket_tenants.pop(old, None)
         for old in previous:
             try:
                 await old.close(code=4000, reason="replaced")
@@ -35,6 +39,7 @@ class ConnectionManager:
     def disconnect_agent(self, email: str, websocket: WebSocket):
         if email in self.agent_connections:
             self.agent_connections[email].discard(websocket)
+            self._agent_socket_tenants.pop(websocket, None)
             if not self.agent_connections[email]:
                 del self.agent_connections[email]
         logger.info(f"WebSocket disconnected for agent: {email}")
@@ -74,6 +79,7 @@ class ConnectionManager:
         sockets = [ws for conns in self.agent_connections.values() for ws in conns]
         sockets += list(self.broadcast_connections)
         self.agent_connections.clear()
+        self._agent_socket_tenants.clear()
         self.broadcast_connections.clear()
         for ws in sockets:
             try:
@@ -81,8 +87,11 @@ class ConnectionManager:
             except Exception as exc:
                 logger.debug("Could not close WebSocket during shutdown: %s", exc)
 
-    def total_active_connections(self) -> int:
-        agent_count = sum(len(conns) for conns in self.agent_connections.values())
-        return agent_count + len(self.broadcast_connections)
+    def total_active_connections(self, tenant_id: str | None = None) -> int:
+        """Open sockets, for one tenant or (None) for the whole server."""
+        if tenant_id is None:
+            return sum(len(conns) for conns in self.agent_connections.values()) + len(self.broadcast_connections)
+        agent_count = sum(1 for t in self._agent_socket_tenants.values() if t == tenant_id)
+        return agent_count + sum(1 for t in self.broadcast_connections.values() if t == tenant_id)
 
 ws_manager = ConnectionManager()

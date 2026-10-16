@@ -8,11 +8,11 @@ from app.database import get_db
 from app.models import SmtpConfig
 from app.schemas import SmtpConfigUpdate, SmtpConfigResponse, SmtpTestRequest, SmtpTestResponse
 from app.services.email_service import _send_smtp_sync
-from app.security import require_admin
+from app.security import require_operator
 from app.services.smtp_secrets import decrypt_password, encrypt_password
 from app.config import settings
 
-router = APIRouter(prefix="/v1/settings", tags=["Settings"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/v1/settings", tags=["Settings"], dependencies=[Depends(require_operator)])
 
 @router.get("/smtp", response_model=SmtpConfigResponse)
 async def get_smtp_config(db: AsyncSession = Depends(get_db)):

@@ -40,6 +40,11 @@ TENANT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 SESSION_TENANT_KEY = "tenant_id"
 
+# Execution option that lifts the tenant filter for one statement. Only for checks that must see the
+# whole table because the thing they protect is global (an inbox address or a domain name is unique
+# across tenants). Never use it to read or change another tenant's data.
+UNSCOPED = {"tenant_scope": False}
+
 
 def validate_tenant_id(tenant_id: object) -> str:
     if not isinstance(tenant_id, str) or not TENANT_ID_PATTERN.fullmatch(tenant_id):
@@ -112,7 +117,7 @@ def bound_tenant(db: "AsyncSession | Session") -> Optional[str]:
 @event.listens_for(Session, "do_orm_execute")
 def _apply_tenant_criteria(state) -> None:
     tenant_id = state.session.info.get(SESSION_TENANT_KEY)
-    if tenant_id is None:
+    if tenant_id is None or state.execution_options.get("tenant_scope") is False:
         return
     if state.is_select or state.is_update or state.is_delete:
         state.statement = state.statement.options(

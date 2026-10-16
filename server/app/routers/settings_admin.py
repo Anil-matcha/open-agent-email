@@ -7,10 +7,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.security import Principal, require_admin
+from app.security import Principal, require_operator
 from app.services import server_settings
 
-router = APIRouter(prefix="/v1/settings", tags=["Settings"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/v1/settings", tags=["Settings"], dependencies=[Depends(require_operator)])
 
 
 class ServerSettingsUpdate(BaseModel):
@@ -33,7 +33,7 @@ async def list_server_settings(db: AsyncSession = Depends(get_db)):
 
 
 @router.put("")
-async def update_server_settings(body: ServerSettingsUpdate, principal: Principal = Depends(require_admin),
+async def update_server_settings(body: ServerSettingsUpdate, principal: Principal = Depends(require_operator),
                                  db: AsyncSession = Depends(get_db)):
     return {"items": await apply_update(db, body.values, principal.principal_id or "admin")}
 

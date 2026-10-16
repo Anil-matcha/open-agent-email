@@ -80,3 +80,32 @@ async def test_review_link_migration_is_safe_when_table_already_exists(db_path):
     assert "review_link_tokens" in inspector.get_table_names()
     assert {"review_notify_email", "review_expiry_hours", "review_expiry_action"} <= {
         c["name"] for c in inspector.get_columns("agents")}
+
+
+async def test_tenant_migration_backfills_existing_rows_to_the_default_tenant(db_path):
+    await migrate.asyncio.to_thread(migrate.command.upgrade, migrate._config(), "0011")
+    con = sqlite3.connect(db_path)
+    con.execute("insert into agents (id, email, display_name, created_at, updated_at) "
+                "values ('ag_old', 'old@agents.local', 'Old', '2026-01-01', '2026-01-01')")
+    con.execute("insert into domains (id, domain, mx_record, spf_record, dkim_record, dmarc_record) "
+                "values ('dom_old', 'old.example', 'mx', 'spf', 'dkim', 'dmarc')")
+    con.commit()
+    con.close()
+    await migrate.asyncio.to_thread(migrate.command.upgrade, migrate._config(), "head")
+    con = sqlite3.connect(db_path)
+    assert con.execute("select tenant_id from agents").fetchall() == [("default",)]
+    assert con.execute("select tenant_id from domains").fetchall() == [("default",)]
+    # Addresses and domains stay unique across tenants.
+    con.execute("insert into agents (id, email, display_name, tenant_id, created_at, updated_at) "
+                "values ('ag_x', 'x@agents.local', 'X', 'other', '2026-01-01', '2026-01-01')")
+    with pytest.raises(sqlite3.IntegrityError):
+        con.execute("insert into agents (id, email, display_name, tenant_id, created_at, updated_at) "
+                    "values ('ag_y', 'x@agents.local', 'Y', 'third', '2026-01-01', '2026-01-01')")
+    con.close()
+
+
+async def test_tenant_migration_downgrades_cleanly(db_path):
+    await migrate.asyncio.to_thread(migrate.command.upgrade, migrate._config(), "head")
+    await migrate.asyncio.to_thread(migrate.command.downgrade, migrate._config(), "0011")
+    columns = {c["name"] for c in inspect(create_engine(f"sqlite:///{db_path}")).get_columns("messages")}
+    assert "tenant_id" not in columns

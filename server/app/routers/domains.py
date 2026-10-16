@@ -10,6 +10,7 @@ from app.database import AsyncSessionLocal, get_db
 from app.models import Domain
 from app.schemas import DomainCreate, DomainResponse
 from app.security import Principal, require_admin
+from app.tenancy import UNSCOPED
 from app.services import domain_dns
 from app.services.smtp_secrets import encrypt_secret
 from app.services.webhook_events import enqueue_domain_webhook_event
@@ -62,7 +63,8 @@ async def create_domain(payload: DomainCreate, db: AsyncSession = Depends(get_db
     if not domain_dns.valid_domain(clean_domain):
         raise HTTPException(status_code=400, detail="Invalid domain name format")
 
-    existing = await db.execute(select(Domain).where(Domain.domain == clean_domain))
+    # Domain names are unique across tenants; the answer is the same whoever holds the name.
+    existing = await db.execute(select(Domain.id).where(Domain.domain == clean_domain).execution_options(**UNSCOPED))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail=f"Domain {clean_domain} is already registered")
 

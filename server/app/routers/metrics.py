@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import OutboundJob, WebhookDelivery
 from app.security import authenticate_token
+from app.tenancy import DEFAULT_TENANT_ID
 
 router = APIRouter(tags=["metrics"])
 
@@ -31,7 +32,8 @@ async def require_metrics_access(request: Request, db: AsyncSession = Depends(ge
     if scrape_token and hmac.compare_digest(token, scrape_token):
         return
     principal = await authenticate_token(token, db)
-    if not principal.is_admin:
+    # Counters and queue depths cover the whole server, so only the operator may read them.
+    if not principal.is_admin or principal.tenant_id != DEFAULT_TENANT_ID:
         raise HTTPException(status_code=403, detail="Administrator or metrics token required")
 
 
