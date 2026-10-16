@@ -103,6 +103,35 @@ def get_token_extractors() -> List[TokenExtractor]:
     return list(_token_extractors)
 
 
+# --- policies a hosted layer can enforce ------------------------------------------------------------
+
+# A policy is an async callable taking keyword context; it raises HTTPException to refuse. The core calls
+# them at the moments below and has no policies of its own, so a single-tenant install is never restricted.
+#   inbox.create   db, tenant_id, address
+#   domain.create  db, tenant_id, domain
+#   message.send   db, tenant_id, agent, recipient
+Policy = Callable[..., Awaitable[None]]
+POLICY_EVENTS = ("inbox.create", "domain.create", "message.send")
+_policies: dict = {event: [] for event in POLICY_EVENTS}
+
+
+def register_policy(event: str, policy: Policy) -> None:
+    if event not in _policies:
+        raise ValueError(f"unknown policy event {event!r}; expected one of {POLICY_EVENTS}")
+    if policy not in _policies[event]:
+        _policies[event].append(policy)
+
+
+def unregister_policy(event: str, policy: Policy) -> None:
+    if policy in _policies.get(event, []):
+        _policies[event].remove(policy)
+
+
+async def enforce_policies(event: str, **context) -> None:
+    for policy in list(_policies[event]):
+        await policy(**context)
+
+
 # --- session binding ------------------------------------------------------------------------------
 
 def bind_tenant(db: "AsyncSession | Session", tenant_id: str) -> None:

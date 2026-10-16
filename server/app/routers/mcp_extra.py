@@ -553,7 +553,7 @@ async def _h_list_domains(db, args, principal):
 
 async def _h_register_domain(db, args, principal):
     _require(args, "domain")
-    return _m(DomainResponse, await domains.create_domain(DomainCreate(domain=args["domain"]), db))
+    return _m(DomainResponse, await domains.create_domain(DomainCreate(domain=args["domain"]), principal, db))
 
 
 async def _h_verify_domain(db, args, principal):

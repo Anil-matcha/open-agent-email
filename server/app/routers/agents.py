@@ -7,7 +7,7 @@ from sqlalchemy import select, and_, or_
 
 from app.database import get_db
 from app.models import Agent, Domain
-from app.tenancy import UNSCOPED
+from app.tenancy import UNSCOPED, enforce_policies
 from app.schemas import AgentCreate, AgentUpdate, AgentResponse
 from app.services.ws_manager import ws_manager
 from app.security import Principal, require_admin
@@ -67,6 +67,8 @@ async def create_agent(agent_in: AgentCreate, principal: Principal = Depends(req
         select(Domain.tenant_id).where(Domain.domain == address_domain).execution_options(**UNSCOPED))
     if domain_owner is not None and domain_owner != principal.tenant_id:
         raise HTTPException(status_code=400, detail="Agent with this email already exists")
+
+    await enforce_policies("inbox.create", db=db, tenant_id=principal.tenant_id, address=agent_in.email)
 
     agent_id = f"ag_{uuid.uuid4().hex[:10]}"
     agent = Agent(

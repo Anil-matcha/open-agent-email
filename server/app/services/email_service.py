@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
+from app.tenancy import enforce_policies
 
 from app.models import Agent, Message, MessageAttachment, ReviewItem, SecurityEvent, SmtpConfig, OutboundJob, WebhookEndpoint, WebhookDelivery, UnsubscribeToken, Contact, ContactEngagement
 from app.config import settings
@@ -620,15 +621,19 @@ class EmailService:
 
             if agent.auto_reply_enabled and scan_result.threat_score < 0.2:
                 reply_text = f"Hello, thank you for reaching out to {agent.display_name}. We have received your inquiry regarding '{subject}' and an agent is processing it."
-                await cls.send_outbound(
-                    db=db,
-                    agent=agent,
-                    recipient=sender,
-                    subject=f"Re: {subject}",
-                    body_text=reply_text,
-                    thread_id=thread_id,
-                    in_reply_to=rfc_id
-                )
+                try:
+                    await cls.send_outbound(
+                        db=db,
+                        agent=agent,
+                        recipient=sender,
+                        subject=f"Re: {subject}",
+                        body_text=reply_text,
+                        thread_id=thread_id,
+                        in_reply_to=rfc_id
+                    )
+                except HTTPException as exc:
+                    # The inbound message is already stored; a refused auto-reply must not fail its delivery.
+                    logger.info("Auto-reply for %s skipped: %s", agent.email, exc.detail)
         elif status == "pending_review":
             await ws_manager.broadcast_event(agent.tenant_id, "review.created", {
                 "review_id": review_item.id if review_item else None,
@@ -672,6 +677,8 @@ class EmailService:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         validate_composed_message_size(subject, body_text or "", body_html, attachments)
+        # A hosted layer may refuse here (daily caps, review holds). Nothing has been stored or reserved yet.
+        await enforce_policies("message.send", db=db, tenant_id=agent.tenant_id, agent=agent, recipient=recipient)
         request_hash = None
         idempotency_decision = None
         if idempotency_key is not None:

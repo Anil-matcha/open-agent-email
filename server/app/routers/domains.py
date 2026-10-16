@@ -10,7 +10,7 @@ from app.database import AsyncSessionLocal, get_db
 from app.models import Domain
 from app.schemas import DomainCreate, DomainResponse
 from app.security import Principal, require_admin
-from app.tenancy import UNSCOPED
+from app.tenancy import UNSCOPED, enforce_policies
 from app.services import domain_dns
 from app.services.smtp_secrets import encrypt_secret
 from app.services.webhook_events import enqueue_domain_webhook_event
@@ -58,7 +58,8 @@ async def get_domain(domain_name: str, db: AsyncSession = Depends(get_db)):
     return domain
 
 @router.post("", response_model=DomainResponse, status_code=201)
-async def create_domain(payload: DomainCreate, db: AsyncSession = Depends(get_db)):
+async def create_domain(payload: DomainCreate, principal: Principal = Depends(require_admin),
+                        db: AsyncSession = Depends(get_db)):
     clean_domain = payload.domain.strip().lower().rstrip(".")
     if not domain_dns.valid_domain(clean_domain):
         raise HTTPException(status_code=400, detail="Invalid domain name format")
@@ -67,6 +68,8 @@ async def create_domain(payload: DomainCreate, db: AsyncSession = Depends(get_db
     existing = await db.execute(select(Domain.id).where(Domain.domain == clean_domain).execution_options(**UNSCOPED))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail=f"Domain {clean_domain} is already registered")
+
+    await enforce_policies("domain.create", db=db, tenant_id=principal.tenant_id, domain=clean_domain)
 
     private_pem, public_b64 = await asyncio.to_thread(domain_dns.generate_dkim_keypair)
     try:

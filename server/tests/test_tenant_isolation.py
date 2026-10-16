@@ -841,3 +841,64 @@ async def test_domain_events_stay_with_the_domains_tenant(client, world):
     owners = {r.endpoint_id for r in rows}
     assert b.ids["account_endpoint_id"] in owners
     assert a.ids["account_endpoint_id"] not in owners and all(r.tenant_id == TENANT_B for r in rows)
+
+
+# --- policy hooks ----------------------------------------------------------------------------------
+
+async def test_policies_run_at_creation_and_send_time_and_can_refuse(client, world):
+    from app.tenancy import register_policy, unregister_policy
+    a, b = world
+    seen = []
+
+    async def refuse_inbox(**ctx):
+        seen.append(("inbox.create", ctx["tenant_id"], ctx["address"]))
+        if ctx["address"].startswith("blocked"):
+            raise HTTPException(status_code=403, detail="not allowed")
+
+    async def refuse_domain(**ctx):
+        seen.append(("domain.create", ctx["tenant_id"], ctx["domain"]))
+        raise HTTPException(status_code=403, detail="no domains")
+
+    async def refuse_send(**ctx):
+        seen.append(("message.send", ctx["tenant_id"], ctx["recipient"]))
+        raise HTTPException(status_code=429, detail="daily limit")
+
+    for event, fn in (("inbox.create", refuse_inbox), ("domain.create", refuse_domain), ("message.send", refuse_send)):
+        register_policy(event, fn)
+    try:
+        ok = await client.post("/v1/agents", headers=A_HEADERS, json={"email": "fine@agents.example.com", "display_name": "f"})
+        assert ok.status_code == 201
+        no = await client.post("/v1/agents", headers=A_HEADERS, json={"email": "blocked@agents.example.com", "display_name": "b"})
+        assert no.status_code == 403 and no.json()["detail"] == "not allowed"
+        assert (await client.post("/v1/domains", headers=A_HEADERS, json={"domain": "new-a.example"})).status_code == 403
+        sent = await client.post(f"/v1/agents/{a.email}/messages", headers=A_HEADERS, json={
+            "recipient": "x@example.org", "subject": "s", "body_text": "b"})
+        assert sent.status_code == 429
+    finally:
+        for event, fn in (("inbox.create", refuse_inbox), ("domain.create", refuse_domain), ("message.send", refuse_send)):
+            unregister_policy(event, fn)
+    assert ("inbox.create", TENANT_A, "blocked@agents.example.com") in seen
+    assert ("message.send", TENANT_A, "x@example.org") in seen
+    async with AsyncSessionLocal() as db:
+        assert await db.scalar(select(Agent.id).where(Agent.email == "blocked@agents.example.com")) is None
+    # With no policies registered the core refuses nothing.
+    assert (await client.post("/v1/domains", headers=A_HEADERS, json={"domain": "new-a.example"})).status_code == 201
+
+
+async def test_a_refused_auto_reply_does_not_fail_inbound_delivery(client, world):
+    from app.tenancy import register_policy, unregister_policy
+    a, _ = world
+    await client.patch(f"/v1/agents/{a.email}", headers=A_HEADERS, json={"auto_reply_enabled": True, "hitl_enabled": False})
+
+    async def refuse_send(**ctx):
+        raise HTTPException(status_code=429, detail="daily limit")
+
+    register_policy("message.send", refuse_send)
+    try:
+        async with AsyncSessionLocal() as db:
+            agent = await db.scalar(select(Agent).where(Agent.email == a.email))
+            message, _, _ = await EmailService.process_inbound(
+                db, agent, sender="friendly@example.org", subject="hello", body_text="hi there")
+        assert message.status == "delivered"
+    finally:
+        unregister_policy("message.send", refuse_send)
