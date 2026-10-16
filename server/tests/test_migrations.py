@@ -109,3 +109,39 @@ async def test_tenant_migration_downgrades_cleanly(db_path):
     await migrate.asyncio.to_thread(migrate.command.downgrade, migrate._config(), "0011")
     columns = {c["name"] for c in inspect(create_engine(f"sqlite:///{db_path}")).get_columns("messages")}
     assert "tenant_id" not in columns
+
+
+async def test_server_starts_on_a_database_from_before_the_latest_migration(db_path, tmp_path):
+    """Startup code reads ORM models, so the schema must be migrated before it runs (a live outage once)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    await migrate.asyncio.to_thread(migrate.command.upgrade, migrate._config(), "0011")
+    con = sqlite3.connect(db_path)
+    con.execute("insert into agents (id, email, display_name, created_at, updated_at) "
+                "values ('ag_old', 'old@agents.local', 'Old', '2026-01-01', '2026-01-01')")
+    from app.services.smtp_secrets import encrypt_secret
+    con.execute("insert into webhook_endpoints (id, agent_email, url, event_types, signing_secret, enabled, created_at, updated_at) "
+                "values ('wh_old', 'old@agents.local', 'https://example.com/h', '[\"*\"]', ?, 1, '2026-01-01', '2026-01-01')",
+                (encrypt_secret("secret", "webhook signing secret"),))
+    con.commit()
+    con.close()
+    script = (
+        "import asyncio\n"
+        "from app.main import app, lifespan\n"
+        "async def go():\n"
+        "    async with lifespan(app):\n"
+        "        pass\n"
+        "asyncio.run(go())\n"
+    )
+    env = {**__import__("os").environ, "DATABASE_URL": f"sqlite+aiosqlite:///{db_path}", "SMTP_PORT": "0",
+           "SMTP_CONFIG_ENCRYPTION_KEY": "Zm9yLXRlc3RzLW9ubHktZmVybmV0LWtleS0wMDAwMDA=", "ADMIN_API_KEY": "k"}
+    server_dir = Path(migrate.__file__).resolve().parent.parent
+    result = await migrate.asyncio.to_thread(
+        subprocess.run, [sys.executable, "-c", script], cwd=server_dir, env=env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr[-1500:]
+    con = sqlite3.connect(db_path)
+    assert con.execute("select tenant_id from webhook_endpoints").fetchall() == [("default",)]
+    assert con.execute("select tenant_id from agents").fetchall() == [("default",)]
+    con.close()

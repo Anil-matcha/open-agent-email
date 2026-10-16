@@ -115,6 +115,8 @@ async def lifespan(app: FastAPI):
             if "ix_messages_is_read" not in message_indexes:
                 sync_conn.execute(text("CREATE INDEX ix_messages_is_read ON messages (is_read)"))
         await conn.run_sync(apply_additive_schema_updates)
+    # Migrate before anything reads the ORM models: they describe the newest schema.
+    await run_migrations(migration_state)
     from sqlalchemy import select
     from app.models import SmtpConfig, WebhookEndpoint
     from app.services.smtp_secrets import (
@@ -149,7 +151,6 @@ async def lifespan(app: FastAPI):
                 if decrypt_with_current_key(stored) is None:
                     setattr(endpoint, attribute, encrypt_secret(plaintext, purpose))
         await db.commit()
-    await run_migrations(migration_state)
     async with AsyncSessionLocal() as settings_db:
         from app.services.server_settings import load_overrides
         await load_overrides(settings_db)
