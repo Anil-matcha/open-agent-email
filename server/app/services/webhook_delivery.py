@@ -186,7 +186,8 @@ async def _deliver(delivery_id: str, lease_token: str) -> None:
     async with AsyncSessionLocal() as db:
         delivery = await db.get(WebhookDelivery, delivery_id)
         endpoint = await db.get(WebhookEndpoint, delivery.endpoint_id) if delivery else None
-        if not delivery or not endpoint or not endpoint.enabled:
+        # A delivery is only ever sent to an endpoint of its own tenant, whatever the stored endpoint id says.
+        if not delivery or not endpoint or not endpoint.enabled or endpoint.tenant_id != delivery.tenant_id:
             endpoint_url = secret_stored = event_type = None
             payload = None
             event_id = delivery_id

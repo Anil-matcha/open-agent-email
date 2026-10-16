@@ -17,7 +17,7 @@ async def _seed(client):
     )
     assert response.status_code == 201
     async with AsyncSessionLocal() as db:
-        db.add(Message(
+        db.add(Message(tenant_id="default",
             id="msg_index", agent_email="attachment-index@agents.local", direction="inbound",
             sender="from@example.com", recipient="attachment-index@agents.local", subject="files",
             body_text="body", thread_id="thread_index", rfc_message_id="<index@example.com>",
@@ -25,10 +25,10 @@ async def _seed(client):
         ))
         await db.flush()
         db.add_all([
-            MessageAttachment(id="att_index_0", message_id="msg_index", filename="first.txt",
+            MessageAttachment(tenant_id="default", id="att_index_0", message_id="msg_index", filename="first.txt",
                               content_type="text/plain", size_bytes=5, content=b"first",
                               created_at=datetime.datetime(2026, 1, 1)),
-            MessageAttachment(id="att_index_1", message_id="msg_index", filename="second.bin",
+            MessageAttachment(tenant_id="default", id="att_index_1", message_id="msg_index", filename="second.bin",
                               content_type="application/octet-stream", size_bytes=6, content=b"second",
                               created_at=datetime.datetime(2026, 1, 2)),
         ])

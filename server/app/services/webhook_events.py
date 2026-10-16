@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import WebhookDelivery, WebhookEndpoint
+from app.models import Agent, WebhookDelivery, WebhookEndpoint
 
 SCHEMA_VERSION = "1"
 
@@ -34,8 +34,16 @@ def _wants_event(endpoint: WebhookEndpoint, event_type: str) -> bool:
 
 
 async def _subscribed_endpoints(db: AsyncSession, agent_email: str, event_type: str) -> list[WebhookEndpoint]:
-    """Enabled, subscribed endpoints for one inbox: its own, plus account-level ones covering it."""
+    """Enabled, subscribed endpoints for one inbox: its own, plus account-level ones covering it.
+
+    Only endpoints of the inbox's own tenant qualify: an account-level endpoint (no inbox) belongs to
+    one tenant and must never see another tenant's events.
+    """
+    tenant_id = await db.scalar(select(Agent.tenant_id).where(Agent.email == agent_email))
+    if tenant_id is None:
+        return []
     endpoints = (await db.execute(select(WebhookEndpoint).where(
+        WebhookEndpoint.tenant_id == tenant_id,
         or_(WebhookEndpoint.agent_email == agent_email, WebhookEndpoint.agent_email.is_(None)),
         WebhookEndpoint.enabled.is_(True),
     ))).scalars().all()
@@ -82,6 +90,7 @@ async def enqueue_email_webhook_event(
             "created_at": timestamp,
         })
         db.add(WebhookDelivery(
+            tenant_id=endpoint.tenant_id,
             id=event_id,
             endpoint_id=endpoint.id,
             agent_email=agent_email,
@@ -111,6 +120,7 @@ async def enqueue_email_received_webhook_event(
     for endpoint in endpoints:
         event_id = f"evt_{uuid.uuid4().hex}"
         db.add(WebhookDelivery(
+            tenant_id=endpoint.tenant_id,
             id=event_id,
             endpoint_id=endpoint.id,
             agent_email=agent_email,
@@ -150,6 +160,7 @@ async def enqueue_outbound_status_webhook_event(
     for endpoint in endpoints:
         event_id = f"evt_{uuid.uuid4().hex}"
         db.add(WebhookDelivery(
+            tenant_id=endpoint.tenant_id,
             id=event_id,
             endpoint_id=endpoint.id,
             agent_email=agent_email,
@@ -195,6 +206,7 @@ async def enqueue_inbound_security_webhook_event(
     for endpoint in endpoints:
         event_id = f"evt_{uuid.uuid4().hex}"
         db.add(WebhookDelivery(
+            tenant_id=endpoint.tenant_id,
             id=event_id,
             endpoint_id=endpoint.id,
             agent_email=agent_email,
@@ -221,6 +233,7 @@ async def enqueue_inbound_security_webhook_event(
 def _queue(db: AsyncSession, endpoint: WebhookEndpoint, event_type: str, flat: dict[str, Any],
            created_at: datetime.datetime) -> None:
     db.add(WebhookDelivery(
+        tenant_id=endpoint.tenant_id,
         id=flat["id"],
         endpoint_id=endpoint.id,
         agent_email=endpoint.agent_email or flat.get("agent_email") or "",
@@ -289,6 +302,7 @@ async def enqueue_domain_webhook_event(
     status: str,
     records: dict[str, str],
     created_at: datetime.datetime,
+    tenant_id: str,
 ) -> None:
     """`domain.sending_verified` / `domain.sending_failed`.
 
@@ -296,6 +310,7 @@ async def enqueue_domain_webhook_event(
     goes to every enabled, subscribed endpoint whose inbox address is on that domain.
     """
     endpoints = (await db.execute(select(WebhookEndpoint).where(
+        WebhookEndpoint.tenant_id == tenant_id,
         or_(WebhookEndpoint.agent_email.like(f"%@{domain}"), WebhookEndpoint.agent_email.is_(None)),
         WebhookEndpoint.enabled.is_(True),
     ))).scalars().all()

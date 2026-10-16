@@ -107,7 +107,7 @@ async def approve_review(
         try:
             decision = await reserve_idempotency(
                 f"{principal.principal_id}:reviews:approve", key,
-                {"review_id": review_id, "body": raw_body.decode("latin1")})
+                {"review_id": review_id, "body": raw_body.decode("latin1")}, tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":

@@ -74,7 +74,7 @@ async def create_api_key(payload: ApiKeyCreate, request: Request,
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         try:
             decision = await reserve_idempotency(
-                f"{principal.principal_id}:api-keys:create", key, await request.body())
+                f"{principal.principal_id}:api-keys:create", key, await request.body(), tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":
@@ -202,7 +202,7 @@ async def create_account_api_key(
         try:
             ensure_idempotency_response_encryption()
             decision = await reserve_idempotency(
-                f"{principal.principal_id}:account-api-keys:create", idem_key, await request.body())
+                f"{principal.principal_id}:account-api-keys:create", idem_key, await request.body(), tenant_id=principal.tenant_id)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:

@@ -41,14 +41,14 @@ async def test_composed_message_ceiling_is_checked_before_queueing(client, monke
 async def test_attachment_metadata_includes_short_lived_signed_download(client):
     await _agent(client)
     async with AsyncSessionLocal() as db:
-        message = Message(
+        message = Message(tenant_id="default",
             id="msg_attach", agent_email="attach@agents.local", direction="inbound", sender="from@example.com",
             recipient="attach@agents.local", subject="file", body_text="body", thread_id="thread_attach",
             rfc_message_id="<attach@example.com>", status="delivered", created_at=datetime.datetime.utcnow(),
         )
         db.add(message)
         await db.flush()
-        db.add(MessageAttachment(id="att_attach", message_id=message.id, filename="note.txt",
+        db.add(MessageAttachment(tenant_id="default", id="att_attach", message_id=message.id, filename="note.txt",
                                  content_type="text/plain", size_bytes=4, content=b"file"))
         await db.commit()
 

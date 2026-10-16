@@ -195,7 +195,7 @@ async def test_automatic_suppression_emits_event(client, kind, source):
     await make_agent(client, AGENT)
     await _endpoint(client, events=["agent.suppression_added", "domain.suppression_added"])
     async with AsyncSessionLocal() as db:
-        db.add(Message(id="msg1", agent_email=AGENT, direction="outbound", sender=AGENT, recipient="to@example.com",
+        db.add(Message(tenant_id="default", id="msg1", agent_email=AGENT, direction="outbound", sender=AGENT, recipient="to@example.com",
                        body_text="b", thread_id="t", rfc_message_id="<1@x>", status="accepted_by_relay",
                        created_at=datetime.datetime.utcnow()))
         await db.commit()
@@ -223,7 +223,7 @@ async def test_transient_bounce_does_not_emit_suppression(client):
     await make_agent(client, AGENT)
     await _endpoint(client, events=["agent.suppression_added", "domain.suppression_added"])
     async with AsyncSessionLocal() as db:
-        db.add(Message(id="msg1", agent_email=AGENT, direction="outbound", sender=AGENT, recipient="to@example.com",
+        db.add(Message(tenant_id="default", id="msg1", agent_email=AGENT, direction="outbound", sender=AGENT, recipient="to@example.com",
                        body_text="b", thread_id="t", rfc_message_id="<1@x>", status="accepted_by_relay",
                        created_at=datetime.datetime.utcnow()))
         await db.commit()
@@ -311,7 +311,7 @@ async def _failing_delivery(client, attempts):
     eid = await _endpoint(client)
     now = datetime.datetime.utcnow()
     async with AsyncSessionLocal() as db:
-        db.add(WebhookDelivery(id="evt_r", endpoint_id=eid, agent_email=AGENT, event_type="email.received",
+        db.add(WebhookDelivery(tenant_id="default", id="evt_r", endpoint_id=eid, agent_email=AGENT, event_type="email.received",
                                payload={"id": "evt_r"}, status="processing", attempts=attempts,
                                lease_token="tok", locked_at=now, created_at=now, available_at=now))
         await db.commit()

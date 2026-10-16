@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.tenancy import bind_tenant
 from app.models import RecipientSuppression, UnsubscribeToken
 from app.services.webhook_events import enqueue_suppression_added_webhook_event
 
@@ -95,6 +96,7 @@ async def unsubscribe_submit(token: str, request: Request, db: AsyncSession = De
     capability = await _lookup(token, db)
     if not capability:
         return _page("Unsubscribe link unavailable", "<p>This link is invalid or expired.</p>", 404)
+    bind_tenant(db, capability.tenant_id)
 
     existing = await db.scalar(select(RecipientSuppression).where(
         RecipientSuppression.agent_email == capability.agent_email,
@@ -102,6 +104,7 @@ async def unsubscribe_submit(token: str, request: Request, db: AsyncSession = De
     ))
     if not existing:
         db.add(RecipientSuppression(
+            tenant_id=capability.tenant_id,
             id=f"sup_{uuid.uuid4().hex[:20]}",
             agent_email=capability.agent_email,
             email=capability.recipient,

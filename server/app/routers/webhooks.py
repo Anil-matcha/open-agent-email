@@ -210,7 +210,7 @@ async def create_webhook(payload: WebhookCreate, request: Request,
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         try:
             decision = await reserve_idempotency(
-                f"{principal.principal_id}:webhooks:create", key, await request.body())
+                f"{principal.principal_id}:webhooks:create", key, await request.body(), tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":
@@ -369,7 +369,7 @@ async def rotate_webhook_secret(endpoint_id: str, request: Request,
         try:
             decision = await reserve_idempotency(
                 f"{principal.principal_id}:webhooks:rotate-secret", key,
-                {"endpoint_id": endpoint_id, "body": (await request.body()).decode("latin1")})
+                {"endpoint_id": endpoint_id, "body": (await request.body()).decode("latin1")}, tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":

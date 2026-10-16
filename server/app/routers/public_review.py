@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.tenancy import bind_tenant
 from app.models import Agent, Message, ReviewItem, ReviewLinkToken
 from app.routers.public_unsubscribe import _page
 from app.services.hitl_service import HitlService
@@ -40,6 +41,7 @@ async def _load(token: str, db: AsyncSession):
     capability = await db.scalar(select(ReviewLinkToken).where(ReviewLinkToken.token_hash == digest))
     if capability is None or capability.expires_at <= datetime.datetime.utcnow():
         return None
+    bind_tenant(db, capability.tenant_id)
     review = await db.get(ReviewItem, capability.review_id)
     message = await db.get(Message, review.message_id) if review else None
     agent = await db.scalar(select(Agent).where(Agent.email == review.agent_email)) if review else None

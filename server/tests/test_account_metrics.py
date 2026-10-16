@@ -11,7 +11,7 @@ from tests.conftest import ADMIN, make_agent, make_key
 async def _message(agent_email, message_id, created_at, *, direction="outbound", status="accepted_by_relay",
                    dmarc_status="unverified", provider_status=None):
     async with AsyncSessionLocal() as db:
-        db.add(Message(
+        db.add(Message(tenant_id="default",
             id=message_id, agent_email=agent_email, direction=direction,
             sender=agent_email, recipient="recipient@example.com", subject="metrics",
             body_text="test", thread_id=f"thread-{message_id}", rfc_message_id=f"<{message_id}@example.com>",

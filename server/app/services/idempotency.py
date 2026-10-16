@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
+from app.tenancy import DEFAULT_TENANT_ID, validate_tenant_id
 from app.models import IdempotencyRecord
 from app.services.smtp_secrets import decrypt_secret, encrypt_secret
 
@@ -64,6 +65,7 @@ async def reserve_idempotency(
     key: str,
     request: bytes | str | Any,
     *,
+    tenant_id: str,
     session_factory: Callable = AsyncSessionLocal,
     now: datetime.datetime | None = None,
     retention: datetime.timedelta = DEFAULT_RETENTION,
@@ -77,6 +79,12 @@ async def reserve_idempotency(
     """
     if not scope or len(scope) > 512:
         raise ValueError("idempotency scope must contain 1 to 512 characters")
+    validate_tenant_id(tenant_id)
+    if tenant_id != DEFAULT_TENANT_ID:
+        # The default tenant keeps the legacy scope string so receipts written before tenancy still replay.
+        scope = f"tenant:{tenant_id}:{scope}"
+        if len(scope) > 512:
+            raise ValueError("idempotency scope must contain 1 to 512 characters")
     if not key or len(key) > 128:
         raise ValueError("Idempotency-Key must contain 1 to 128 characters")
     if retention <= datetime.timedelta(0) or lease <= datetime.timedelta(0):
@@ -95,7 +103,7 @@ async def reserve_idempotency(
             if record is None:
                 token = uuid.uuid4().hex
                 record = IdempotencyRecord(
-                    id=f"idem_{uuid.uuid4().hex}", scope=scope,
+                    id=f"idem_{uuid.uuid4().hex}", tenant_id=tenant_id, scope=scope,
                     idempotency_key=key, request_digest=digest,
                     state="in_progress", claim_token=token,
                     created_at=current, updated_at=current,

@@ -136,7 +136,7 @@ async def verify_domain(domain_name: str, db: AsyncSession = Depends(get_db)):
     if event_type:
         await enqueue_domain_webhook_event(
             db, event_type=event_type, domain=domain.domain, status=domain.status,
-            records=records, created_at=domain.last_checked_at,
+            records=records, created_at=domain.last_checked_at, tenant_id=domain.tenant_id,
         )
     await db.commit()
     await db.refresh(domain)
@@ -153,7 +153,7 @@ async def delete_domain(domain_name: str, request: Request,
         try:
             decision = await reserve_idempotency(
                 f"{principal.principal_id}:domains:delete", key,
-                {"domain": clean_domain, "body": (await request.body()).decode("latin1")})
+                {"domain": clean_domain, "body": (await request.body()).decode("latin1")}, tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":

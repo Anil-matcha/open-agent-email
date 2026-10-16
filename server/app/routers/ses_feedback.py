@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.tenancy import bind_tenant
 from app.models import Message, ProviderFeedbackReceipt, RecipientSuppression
 from app.services.recipient_suppressions import canonicalize_recipient, get_recipient_suppression
 from app.services.webhook_events import (
@@ -188,6 +189,8 @@ async def _apply_feedback(db: AsyncSession, event: dict) -> None:
     ))
     if message is None:
         return
+    # Everything below acts for the tenant that owns the correlated message.
+    bind_tenant(db, message.tenant_id)
     for raw_recipient in recipients:
         if not isinstance(raw_recipient, str):
             continue
@@ -223,7 +226,7 @@ async def _apply_feedback(db: AsyncSession, event: dict) -> None:
         if not should_suppress or await get_recipient_suppression(db, message.agent_email, recipient):
             continue
         db.add(RecipientSuppression(
-            id=f"sup_{uuid.uuid4().hex[:24]}", agent_email=message.agent_email,
+            tenant_id=message.tenant_id, id=f"sup_{uuid.uuid4().hex[:24]}", agent_email=message.agent_email,
             email=recipient, reason=reason,
         ))
         await enqueue_suppression_added_webhook_event(

@@ -65,7 +65,7 @@ async def test_permanent_delete_removes_everything_and_leaves_content_free_audit
     mid = await _send(client, attachments=[{"filename": "a.txt", "content_base64": "aGk="}])
     async with AsyncSessionLocal() as db:
         job_id = await db.scalar(select(OutboundJob.id).where(OutboundJob.message_id == mid))
-        db.add(OutboundRetryEvent(id="rt1", job_id=job_id, actor="admin:x", previous_attempts=1))
+        db.add(OutboundRetryEvent(tenant_id="default", id="rt1", job_id=job_id, actor="admin:x", previous_attempts=1))
         await db.commit()
     await _finish_job(mid, "failed")
     r = await client.delete(f"{BASE}/messages/{mid}?permanent=true&confirm=DELETE", headers=ADMIN)

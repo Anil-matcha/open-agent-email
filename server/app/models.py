@@ -3,8 +3,9 @@ from sqlalchemy import Column, String, Boolean, Float, Text, DateTime, ForeignKe
 from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.orm import Session, relationship
 from app.database import Base
+from app.tenancy import TenantOwned, stamp_new_rows
 
-class Agent(Base):
+class Agent(TenantOwned, Base):
     __tablename__ = "agents"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -28,7 +29,7 @@ class Agent(Base):
     contacts = relationship("Contact", back_populates="agent", cascade="all, delete-orphan")
 
 
-class Contact(Base):
+class Contact(TenantOwned, Base):
     __tablename__ = "contacts"
     __table_args__ = (UniqueConstraint("agent_email", "email", name="uq_contacts_agent_email_email"),)
 
@@ -46,7 +47,7 @@ class Contact(Base):
     agent = relationship("Agent", back_populates="contacts")
 
 
-class ContactEngagement(Base):
+class ContactEngagement(TenantOwned, Base):
     """Inbox-scoped follow-up state; due dates never trigger outbound mail."""
     __tablename__ = "contact_engagements"
     __table_args__ = (
@@ -66,7 +67,7 @@ class ContactEngagement(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
-class ContactConsentEvent(Base):
+class ContactConsentEvent(TenantOwned, Base):
     """Append-only inbox-scoped record of an operator-entered consent change."""
     __tablename__ = "contact_consent_events"
 
@@ -80,7 +81,7 @@ class ContactConsentEvent(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
 
 
-class EmailTemplate(Base):
+class EmailTemplate(TenantOwned, Base):
     """Reusable, inbox-scoped message content; templates never send by themselves."""
     __tablename__ = "email_templates"
     __table_args__ = (
@@ -99,7 +100,7 @@ class EmailTemplate(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
-class ContactImportBatch(Base):
+class ContactImportBatch(TenantOwned, Base):
     __tablename__ = "contact_import_batches"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -108,7 +109,7 @@ class ContactImportBatch(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
 
 
-class RecipientSuppression(Base):
+class RecipientSuppression(TenantOwned, Base):
     """Recipient addresses an inbox has explicitly blocked from outbound mail."""
     __tablename__ = "recipient_suppressions"
     __table_args__ = (UniqueConstraint("agent_email", "email", name="uq_suppressions_agent_email_email"),)
@@ -129,7 +130,7 @@ class ProviderFeedbackReceipt(Base):
     received_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
 
 
-class IdempotencyRecord(Base):
+class IdempotencyRecord(TenantOwned, Base):
     """Durable response receipt for a scoped API idempotency key."""
     __tablename__ = "idempotency_records"
     __table_args__ = (
@@ -153,7 +154,7 @@ class IdempotencyRecord(Base):
     lease_expires_at = Column(DateTime, nullable=False)
 
 
-class UnsubscribeToken(Base):
+class UnsubscribeToken(TenantOwned, Base):
     """Hashed, inbox-and-recipient scoped public unsubscribe capability."""
     __tablename__ = "unsubscribe_tokens"
 
@@ -164,7 +165,7 @@ class UnsubscribeToken(Base):
     used_at = Column(DateTime, nullable=True)
 
 
-class ReviewLinkToken(Base):
+class ReviewLinkToken(TenantOwned, Base):
     """Hashed, single-use, expiring capability to approve or reject one held message by email link."""
     __tablename__ = "review_link_tokens"
 
@@ -177,7 +178,7 @@ class ReviewLinkToken(Base):
     used_at = Column(DateTime, nullable=True)
 
 
-class Message(Base):
+class Message(TenantOwned, Base):
     __tablename__ = "messages"
     __table_args__ = (
         UniqueConstraint("agent_email", "idempotency_key", name="uq_messages_agent_idempotency_key"),
@@ -251,7 +252,7 @@ class Message(Base):
     attachments = relationship("MessageAttachment", back_populates="message", cascade="all, delete-orphan")
 
 
-class MessagePurgeLog(Base):
+class MessagePurgeLog(TenantOwned, Base):
     """Audit trail of permanent message deletions. Never stores message content."""
     __tablename__ = "message_purge_log"
 
@@ -263,7 +264,7 @@ class MessagePurgeLog(Base):
     purged_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, index=True)
 
 
-class MessageAttachment(Base):
+class MessageAttachment(TenantOwned, Base):
     __tablename__ = "message_attachments"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -277,7 +278,7 @@ class MessageAttachment(Base):
     message = relationship("Message", back_populates="attachments")
 
 
-class OutboundJob(Base):
+class OutboundJob(TenantOwned, Base):
     __tablename__ = "outbound_jobs"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -292,7 +293,7 @@ class OutboundJob(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
 
 
-class OutboundRetryEvent(Base):
+class OutboundRetryEvent(TenantOwned, Base):
     __tablename__ = "outbound_retry_events"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -304,7 +305,7 @@ class OutboundRetryEvent(Base):
     previous_status = Column(String(24), nullable=True)
 
 
-class WebhookEndpoint(Base):
+class WebhookEndpoint(TenantOwned, Base):
     __tablename__ = "webhook_endpoints"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -321,7 +322,7 @@ class WebhookEndpoint(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
-class WebhookDelivery(Base):
+class WebhookDelivery(TenantOwned, Base):
     __tablename__ = "webhook_deliveries"
 
     id = Column(String(64), primary_key=True, index=True)  # stable event ID
@@ -342,7 +343,7 @@ class WebhookDelivery(Base):
     delivered_at = Column(DateTime, nullable=True)
 
 
-class ReviewItem(Base):
+class ReviewItem(TenantOwned, Base):
     __tablename__ = "review_items"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -359,7 +360,7 @@ class ReviewItem(Base):
     message = relationship("Message", back_populates="review_item")
 
 
-class ApiKey(Base):
+class ApiKey(TenantOwned, Base):
     __tablename__ = "api_keys"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -374,7 +375,7 @@ class ApiKey(Base):
     agent = relationship("Agent", back_populates="api_keys")
 
 
-class SecurityEvent(Base):
+class SecurityEvent(TenantOwned, Base):
     __tablename__ = "security_events"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -385,7 +386,7 @@ class SecurityEvent(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
 
 
-class Domain(Base):
+class Domain(TenantOwned, Base):
     __tablename__ = "domains"
 
     id = Column(String(64), primary_key=True, index=True)
@@ -432,7 +433,7 @@ class ServerSetting(Base):
     updated_by = Column(String(64), nullable=False, default="admin")
 
 
-class MessageLifecycleEntry(Base):
+class MessageLifecycleEntry(TenantOwned, Base):
     """Append-only record of one state transition of a message."""
     __tablename__ = "message_lifecycle_entries"
 
@@ -465,35 +466,38 @@ def _history(obj, name):
 @event.listens_for(Session, "before_flush")
 def _record_lifecycle(session, flush_context, instances):
     """Append ledger rows for message, review and job transitions staged in this flush."""
-    def add(message_id, code, detail=""):
-        session.add(MessageLifecycleEntry(message_id=message_id, code=code, detail=(detail or "")[:1000]))
+    stamp_new_rows(session)
+
+    def add(message_id, code, detail="", *, tenant_id):
+        session.add(MessageLifecycleEntry(
+            tenant_id=tenant_id, message_id=message_id, code=code, detail=(detail or "")[:1000]))
 
     for obj in list(session.new):
         if isinstance(obj, Message):
-            add(obj.id, "created", f"{obj.direction} message recorded")
+            add(obj.id, "created", f"{obj.direction} message recorded", tenant_id=obj.tenant_id)
             code = _STATUS_TO_CODE.get(obj.status or "")
             if code:
-                add(obj.id, code, obj.delivery_error or "")
+                add(obj.id, code, obj.delivery_error or "", tenant_id=obj.tenant_id)
         elif isinstance(obj, ReviewItem):
-            add(obj.message_id, "review_requested", obj.reason or "")
+            add(obj.message_id, "review_requested", obj.reason or "", tenant_id=obj.tenant_id)
         elif isinstance(obj, OutboundJob):
-            add(obj.message_id, "queued", "")
+            add(obj.message_id, "queued", "", tenant_id=obj.tenant_id)
     for obj in list(session.dirty):
         if isinstance(obj, Message):
             status = _history(obj, "status")
             if status.has_changes() and status.added:
                 code = _STATUS_TO_CODE.get(status.added[0] or "")
                 if code:
-                    add(obj.id, code, obj.delivery_error or "")
+                    add(obj.id, code, obj.delivery_error or "", tenant_id=obj.tenant_id)
             provider = _history(obj, "provider_delivery_status")
             if provider.has_changes() and provider.added and provider.added[0]:
                 value = provider.added[0]
-                add(obj.id, f"provider_{value}", obj.provider_delivery_error or "")
+                add(obj.id, f"provider_{value}", obj.provider_delivery_error or "", tenant_id=obj.tenant_id)
             deleted = _history(obj, "deleted_at")
             if deleted.has_changes() and deleted.added:
                 was_set = bool(deleted.deleted and deleted.deleted[0])
                 is_set = deleted.added[0] is not None
                 if is_set and not was_set:
-                    add(obj.id, "trashed")
+                    add(obj.id, "trashed", tenant_id=obj.tenant_id)
                 elif was_set and not is_set:
-                    add(obj.id, "restored")
+                    add(obj.id, "restored", tenant_id=obj.tenant_id)

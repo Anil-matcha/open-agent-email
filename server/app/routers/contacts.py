@@ -128,7 +128,7 @@ async def import_contacts_json(request: Request,
         try:
             decision = await reserve_idempotency(
                 f"{principal.principal_id}:contacts:json-import", key,
-                {"agent_email": email, "body": raw_body.decode("latin1")})
+                {"agent_email": email, "body": raw_body.decode("latin1")}, tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":
@@ -310,7 +310,7 @@ async def create_contact(email: str, payload: ContactCreate, request: Request,
         try:
             decision = await reserve_idempotency(
                 f"{principal.principal_id}:contacts:create", key,
-                {"agent_email": email, "body": raw_body.decode("latin1")})
+                {"agent_email": email, "body": raw_body.decode("latin1")}, tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":
@@ -462,7 +462,7 @@ async def import_contacts(email: str, request: Request,
         try:
             decision = await reserve_idempotency(
                 f"{principal.principal_id}:contacts:imports:create", key,
-                {"agent_email": email, "body": raw_body.decode("latin1")})
+                {"agent_email": email, "body": raw_body.decode("latin1")}, tenant_id=principal.tenant_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if decision.outcome == "replay":

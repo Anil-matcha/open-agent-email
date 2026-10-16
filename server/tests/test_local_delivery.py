@@ -94,7 +94,7 @@ async def test_attachments_are_copied_to_the_recipient(client):
     await _setup(client)
     sent = await _send(client)
     async with AsyncSessionLocal() as db:
-        db.add(MessageAttachment(id="att_localtest0001", message_id=sent["id"], filename="a.txt",
+        db.add(MessageAttachment(tenant_id="default", id="att_localtest0001", message_id=sent["id"], filename="a.txt",
                                  content_type="text/plain", size_bytes=3, content=b"abc"))
         await db.commit()
     await _dispatch_one()

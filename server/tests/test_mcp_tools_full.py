@@ -306,11 +306,11 @@ async def test_suppression_create_and_delete(client):
 
 async def _seed_attachment(inbox, content=b"hello", size=None):
     async with AsyncSessionLocal() as db:
-        db.add(Message(id="m1", agent_email=inbox, direction="inbound", sender="x@example.com", recipient=inbox,
+        db.add(Message(tenant_id="default", id="m1", agent_email=inbox, direction="inbound", sender="x@example.com", recipient=inbox,
                        body_text="b", thread_id="t", rfc_message_id="<m1@x>", status="delivered",
                        created_at=datetime.datetime.utcnow()))
         await db.flush()
-        db.add(MessageAttachment(id="att1", message_id="m1", filename="a.txt", content_type="text/plain",
+        db.add(MessageAttachment(tenant_id="default", id="att1", message_id="m1", filename="a.txt", content_type="text/plain",
                                  size_bytes=size if size is not None else len(content), content=content))
         await db.commit()
 
@@ -375,7 +375,7 @@ async def test_event_tools(client):
     await make_agent(client, A)
     wid = (await ok(client, ADMIN, "create_webhook", agent_email=A, url="https://example.com/hook"))["id"]
     async with AsyncSessionLocal() as db:
-        db.add(WebhookDelivery(id="evt_x", endpoint_id=wid, agent_email=A, event_type="email.received",
+        db.add(WebhookDelivery(tenant_id="default", id="evt_x", endpoint_id=wid, agent_email=A, event_type="email.received",
                                payload={"k": 1}, status="failed", created_at=datetime.datetime.utcnow()))
         await db.commit()
     page = await ok(client, ADMIN, "list_events")
@@ -538,7 +538,7 @@ async def test_mcp_forwards_idempotency_for_parity_write_operations(client):
     assert await ok(client, ADMIN, "rotate_webhook_secret", webhook_id=webhook["id"], idempotency_key="mcp-rotate-1") == rotated
 
     async with AsyncSessionLocal() as db:
-        db.add(Domain(id="dom_mcpidem", domain="mcp-idem.example", status="pending_dns",
+        db.add(Domain(tenant_id="default", id="dom_mcpidem", domain="mcp-idem.example", status="pending_dns",
                       mx_record="mx", spf_record="spf", dkim_record="dkim", dmarc_record="dmarc",
                       created_at=datetime.datetime.utcnow()))
         await db.commit()

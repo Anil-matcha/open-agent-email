@@ -197,7 +197,7 @@ class EmailService:
         return parent_id, " ".join(selected) or None
 
     @staticmethod
-    async def _dkim_signing_for(db: AsyncSession, from_addr: str) -> Optional[Dict[str, str]]:
+    async def _dkim_signing_for(db: AsyncSession, from_addr: str, tenant_id: str) -> Optional[Dict[str, str]]:
         """DKIM parameters when the From domain is a registered, fully verified domain with a managed key."""
         from app.models import Domain
         from app.services.smtp_secrets import decrypt_secret
@@ -205,7 +205,7 @@ class EmailService:
         if not domain_name:
             return None
         domain = await db.scalar(select(Domain).where(
-            Domain.domain == domain_name, Domain.status == "verified", Domain.dkim_private_key.is_not(None)))
+            Domain.domain == domain_name, Domain.tenant_id == tenant_id, Domain.status == "verified", Domain.dkim_private_key.is_not(None)))
         if domain is None:
             return None
         try:
@@ -286,6 +286,7 @@ class EmailService:
         if base_url and not platform_originated:
             raw_token, token_hash = issue_token()
             db.add(UnsubscribeToken(
+                tenant_id=agent.tenant_id,
                 token_hash=token_hash,
                 agent_email=agent.email,
                 recipient=canonicalize_recipient(message.recipient),
@@ -294,7 +295,7 @@ class EmailService:
             await db.commit()
             unsubscribe_url = f"{base_url}/unsubscribe/{raw_token}"
         try:
-            dkim_signing = await cls._dkim_signing_for(db, from_addr)
+            dkim_signing = await cls._dkim_signing_for(db, from_addr, agent.tenant_id)
         except RuntimeError as exc:
             return "failed", str(exc)
         port_num = int(config.port) if str(config.port).isdigit() else 587
@@ -429,6 +430,7 @@ class EmailService:
         threat_details_json = json.dumps([t.model_dump() for t in scan_result.detected_threats])
 
         message = Message(
+            tenant_id=agent.tenant_id,
             id=msg_id,
             agent_email=agent.email,
             direction="inbound",
@@ -480,6 +482,7 @@ class EmailService:
                     engagement.replied_at = message.created_at
         for attachment in attachments or []:
             db.add(MessageAttachment(
+                tenant_id=agent.tenant_id,
                 id=f"att_{uuid.uuid4().hex[:16]}", message_id=msg_id,
                 filename=attachment["filename"], content_type=attachment["content_type"],
                 size_bytes=len(attachment["content"]), content=attachment["content"],
@@ -487,6 +490,7 @@ class EmailService:
 
         if scan_result.detected_threats:
             sec_event = SecurityEvent(
+                tenant_id=agent.tenant_id,
                 id=f"sec_{uuid.uuid4().hex[:12]}",
                 agent_email=agent.email,
                 threat_type=scan_result.detected_threats[0].threat_type,
@@ -498,6 +502,7 @@ class EmailService:
 
         if status == "pending_review":
             review_item = ReviewItem(
+                tenant_id=agent.tenant_id,
                 id=f"rev_{uuid.uuid4().hex[:12]}",
                 message_id=msg_id,
                 agent_email=agent.email,
@@ -528,6 +533,7 @@ class EmailService:
             for endpoint in endpoints:
                 event_id = f"evt_{uuid.uuid4().hex}"
                 db.add(WebhookDelivery(
+                    tenant_id=agent.tenant_id,
                     id=event_id,
                     endpoint_id=endpoint.id,
                     agent_email=agent.email,
@@ -610,7 +616,7 @@ class EmailService:
 
         if status == "delivered":
             await ws_manager.send_agent_message(agent.email, "email.received", msg_payload)
-            await ws_manager.broadcast_event("email.received", msg_payload)
+            await ws_manager.broadcast_event(agent.tenant_id, "email.received", msg_payload)
 
             if agent.auto_reply_enabled and scan_result.threat_score < 0.2:
                 reply_text = f"Hello, thank you for reaching out to {agent.display_name}. We have received your inquiry regarding '{subject}' and an agent is processing it."
@@ -624,13 +630,13 @@ class EmailService:
                     in_reply_to=rfc_id
                 )
         elif status == "pending_review":
-            await ws_manager.broadcast_event("review.created", {
+            await ws_manager.broadcast_event(agent.tenant_id, "review.created", {
                 "review_id": review_item.id if review_item else None,
                 "message": msg_payload,
                 "reason": scan_result.analysis_summary
             })
         else:
-            await ws_manager.broadcast_event("email.blocked", msg_payload)
+            await ws_manager.broadcast_event(agent.tenant_id, "email.blocked", msg_payload)
 
         return message, scan_result, review_item
 
@@ -700,7 +706,7 @@ class EmailService:
                 )
                 legacy_request_hash = hashlib.sha256(legacy_request.encode("utf-8")).hexdigest()
             idempotency_decision = await reserve_idempotency(
-                f"outbound:{agent.email}", idempotency_key, request_fields,
+                f"outbound:{agent.email}", idempotency_key, request_fields, tenant_id=agent.tenant_id,
             )
             if idempotency_decision.outcome == "conflict":
                 raise HTTPException(status_code=422, detail="Idempotency-Key was already used with a different request")
@@ -759,6 +765,7 @@ class EmailService:
             status = "sending"
 
         message = Message(
+            tenant_id=agent.tenant_id,
             id=msg_id,
             agent_email=agent.email,
             direction="outbound",
@@ -790,6 +797,7 @@ class EmailService:
 
         for attachment in attachments or []:
             db.add(MessageAttachment(
+                tenant_id=agent.tenant_id,
                 id=f"att_{uuid.uuid4().hex[:16]}", message_id=msg_id,
                 filename=attachment["filename"], content_type=attachment["content_type"],
                 size_bytes=len(attachment["content"]), content=attachment["content"],
@@ -798,6 +806,7 @@ class EmailService:
         review_item = None
         if status == "pending_review":
             review_item = ReviewItem(
+                tenant_id=agent.tenant_id,
                 id=f"rev_{uuid.uuid4().hex[:12]}",
                 message_id=msg_id,
                 agent_email=agent.email,
@@ -819,6 +828,7 @@ class EmailService:
             )
         else:
             db.add(OutboundJob(
+                tenant_id=agent.tenant_id,
                 id=f"out_{uuid.uuid4().hex[:24]}",
                 message_id=msg_id,
                 status="pending",
@@ -870,7 +880,7 @@ class EmailService:
         }
 
         if status == "pending_review":
-            await ws_manager.broadcast_event("review.created", {
+            await ws_manager.broadcast_event(agent.tenant_id, "review.created", {
                 "review_id": review_item.id if review_item else None,
                 "message": event_data,
                 "reason": f"Outbound approval gate active for {agent.display_name}"
@@ -880,7 +890,7 @@ class EmailService:
                 schedule_review_notification(review_item.id)
         else:
             await ws_manager.send_agent_message(agent.email, "email.queued", event_data)
-            await ws_manager.broadcast_event("email.queued", event_data)
+            await ws_manager.broadcast_event(agent.tenant_id, "email.queued", event_data)
 
         return message
 

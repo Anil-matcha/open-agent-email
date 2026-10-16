@@ -79,7 +79,7 @@ async def notify_review_requested(review_id: str) -> bool:
             for action in ("approve", "reject"):
                 raw, digest = issue_review_token()
                 db.add(ReviewLinkToken(
-                    token_hash=digest, review_id=review.id, action=action,
+                    tenant_id=review.tenant_id, token_hash=digest, review_id=review.id, action=action,
                     reviewer_email=agent.review_notify_email, created_at=now, expires_at=now + lifetime,
                 ))
                 links[action] = f"{base_url}/review-link/{raw}"

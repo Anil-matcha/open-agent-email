@@ -72,6 +72,7 @@ async def publish_due_contact_events(now: datetime.datetime | None = None, limit
             for endpoint in endpoints:
                 event_id = f"evt_{uuid.uuid4().hex}"
                 db.add(WebhookDelivery(
+                    tenant_id=endpoint.tenant_id,
                     id=event_id,
                     endpoint_id=endpoint.id,
                     agent_email=engagement.agent_email,

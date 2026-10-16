@@ -133,7 +133,7 @@ async def test_domain_events_reach_account_endpoints_by_domain_filter(client):
     async with AsyncSessionLocal() as db:
         await enqueue_domain_webhook_event(
             db, event_type="domain.sending_verified", domain="other.example.net", status="verified",
-            records={}, created_at=datetime.datetime.utcnow())
+            records={}, created_at=datetime.datetime.utcnow(), tenant_id="default")
         await db.commit()
     assert len(await _deliveries(anywhere["id"])) == 1
     assert await _deliveries(elsewhere["id"]) == []  # its inbox filter names a different domain

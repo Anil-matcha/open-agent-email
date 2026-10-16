@@ -40,7 +40,7 @@ async def test_in_flight_send_key_returns_conflict(client):
         "subject": "hello", "body_text": "body", "body_html": None,
         "thread_id": None, "conversation_id": None, "in_reply_to": None,
         "references": None, "attachments": [],
-    })
+    }, tenant_id="default")
     response = await client.post(MSGS, headers={**ADMIN, "Idempotency-Key": "busy-send"}, json=PAYLOAD)
     assert response.status_code == 409
     assert "already in progress" in response.json()["detail"]

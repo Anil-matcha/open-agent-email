@@ -43,7 +43,7 @@ async def test_contact_create_replays_conflicts_and_reports_in_flight(client):
 
     pending_body = _raw_json({"email": "pending@example.com", "name": "Pending"})
     await reserve_idempotency(f"{ADMIN_ID}:contacts:create", "contact-pending",
-                              {"agent_email": A, "body": pending_body.decode("latin1")})
+                              {"agent_email": A, "body": pending_body.decode("latin1")}, tenant_id="default")
     pending = await client.post(path, content=pending_body,
                                 headers={**_headers("contact-pending"), "content-type": "application/json"})
     assert pending.status_code == 409 and "still in progress" in pending.json()["detail"]
@@ -70,7 +70,7 @@ async def test_csv_import_replays_conflicts_and_reports_in_flight(client):
 
     pending_body = b"email,name\npending@example.com,Pending\n"
     await reserve_idempotency(f"{ADMIN_ID}:contacts:imports:create", "import-pending",
-                              {"agent_email": A, "body": pending_body.decode("latin1")})
+                              {"agent_email": A, "body": pending_body.decode("latin1")}, tenant_id="default")
     pending = await client.post(path, content=pending_body,
                                 headers={**_headers("import-pending"), "content-type": "text/csv"})
     assert pending.status_code == 409 and "still in progress" in pending.json()["detail"]
@@ -79,7 +79,7 @@ async def test_csv_import_replays_conflicts_and_reports_in_flight(client):
 
 async def _seed_domain(domain):
     async with AsyncSessionLocal() as db:
-        db.add(Domain(id=f"dom_{domain[:8]}", domain=domain, status="pending_dns",
+        db.add(Domain(tenant_id="default", id=f"dom_{domain[:8]}", domain=domain, status="pending_dns",
                       mx_record="mx", spf_record="spf", dkim_record="dkim",
                       dmarc_record="dmarc", created_at=datetime.datetime.utcnow()))
         await db.commit()
@@ -98,7 +98,7 @@ async def test_domain_delete_replays_conflicts_and_reports_in_flight(client):
     assert await _count(Domain) == 1
 
     await reserve_idempotency(f"{ADMIN_ID}:domains:delete", "domain-pending",
-                              {"domain": "two.example.com", "body": ""})
+                              {"domain": "two.example.com", "body": ""}, tenant_id="default")
     pending = await client.delete("/v1/domains/two.example.com", headers=_headers("domain-pending"))
     assert pending.status_code == 409 and "still in progress" in pending.json()["detail"]
     assert await _count(Domain) == 1
@@ -132,7 +132,7 @@ async def test_review_approval_replays_conflicts_and_reports_in_flight(client):
     pending_review = await _held(client, create_agent=False)
     pending_body = b""
     await reserve_idempotency(f"{ADMIN_ID}:reviews:approve", "approve-pending",
-                              {"review_id": pending_review, "body": pending_body.decode("latin1")})
+                              {"review_id": pending_review, "body": pending_body.decode("latin1")}, tenant_id="default")
     pending = await client.post(f"/v1/reviews/{pending_review}/approve",
                                 headers=_headers("approve-pending"))
     assert pending.status_code == 409 and "still in progress" in pending.json()["detail"]

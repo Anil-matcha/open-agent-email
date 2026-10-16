@@ -45,7 +45,7 @@ async def purge_message(db: AsyncSession, message: Message, *, purged_by: str, r
     await db.execute(delete(MessageAttachment).where(MessageAttachment.message_id == message_id))
     await db.execute(delete(MessageLifecycleEntry).where(MessageLifecycleEntry.message_id == message_id))
     db.add(MessagePurgeLog(
-        agent_email=agent_email, message_id=message_id, purged_by=purged_by[:128], reason=reason,
+        tenant_id=message.tenant_id, agent_email=agent_email, message_id=message_id, purged_by=purged_by[:128], reason=reason,
         purged_at=datetime.datetime.utcnow(),
     ))
     await db.execute(delete(Message).where(Message.id == message_id))

@@ -84,7 +84,7 @@ async def _dispatch_one() -> bool:
                         "delivery_error": message.delivery_error,
                     }
                     await ws_manager.send_agent_message(message.agent_email, "email.delivery_unknown", payload)
-                    await ws_manager.broadcast_event("email.delivery_unknown", payload)
+                    await ws_manager.broadcast_event(message.tenant_id, "email.delivery_unknown", payload)
             else:
                 await db.rollback()
             return True
@@ -227,7 +227,7 @@ async def _dispatch_one() -> bool:
                 "delivery_unknown": "email.delivery_unknown",
             }[status]
             await ws_manager.send_agent_message(message.agent_email, event_name, payload)
-            await ws_manager.broadcast_event(event_name, payload)
+            await ws_manager.broadcast_event(message.tenant_id, event_name, payload)
         return True
 
 

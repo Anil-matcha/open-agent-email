@@ -17,7 +17,7 @@ async def _endpoint(client):
 
 async def _delivery(endpoint_id, status="failed"):
     async with AsyncSessionLocal() as db:
-        db.add(WebhookDelivery(id="evt_1", endpoint_id=endpoint_id, agent_email="a@agents.local",
+        db.add(WebhookDelivery(tenant_id="default", id="evt_1", endpoint_id=endpoint_id, agent_email="a@agents.local",
                                event_type="email.received", payload={"x": 1}, status=status,
                                created_at=datetime.datetime.utcnow()))
         await db.commit()
@@ -57,9 +57,9 @@ async def test_event_filter_is_bound_to_cursor(client):
     eid = await _endpoint(client)
     async with AsyncSessionLocal() as db:
         db.add_all([
-            WebhookDelivery(id="evt_a1", endpoint_id=eid, agent_email="a@agents.local", event_type="email.received",
+            WebhookDelivery(tenant_id="default", id="evt_a1", endpoint_id=eid, agent_email="a@agents.local", event_type="email.received",
                             payload={"n": 1}, status="failed", created_at=datetime.datetime.utcnow()),
-            WebhookDelivery(id="evt_a2", endpoint_id=eid, agent_email="a@agents.local", event_type="email.received",
+            WebhookDelivery(tenant_id="default", id="evt_a2", endpoint_id=eid, agent_email="a@agents.local", event_type="email.received",
                             payload={"n": 2}, status="failed", created_at=datetime.datetime.utcnow()),
         ])
         await db.commit()
@@ -76,7 +76,7 @@ async def test_event_time_filters_are_inclusive_and_bound_to_cursor(client):
     start = datetime.datetime(2026, 1, 1, 0, 0, 0)
     async with AsyncSessionLocal() as db:
         db.add_all([
-            WebhookDelivery(id=f"evt_time_{i}", endpoint_id=eid, agent_email="a@agents.local",
+            WebhookDelivery(tenant_id="default", id=f"evt_time_{i}", endpoint_id=eid, agent_email="a@agents.local",
                             event_type="email.received", payload={}, status="failed",
                             created_at=start + datetime.timedelta(days=i))
             for i in range(3)

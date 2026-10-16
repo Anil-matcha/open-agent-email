@@ -9,8 +9,8 @@ from app.routers.ses_feedback import MESSAGE_ID_HEADER, _apply_feedback
 
 async def _seed(recipient="to@example.com"):
     async with AsyncSessionLocal() as db:
-        db.add(Agent(id="ag1", email="a@agents.local", display_name="A"))
-        db.add(Message(id="msg1", agent_email="a@agents.local", direction="outbound", sender="a@agents.local",
+        db.add(Agent(tenant_id="default", id="ag1", email="a@agents.local", display_name="A"))
+        db.add(Message(tenant_id="default", id="msg1", agent_email="a@agents.local", direction="outbound", sender="a@agents.local",
                        recipient=recipient, body_text="hi", thread_id="t1", rfc_message_id="<1@x>",
                        status="accepted_by_relay", created_at=datetime.datetime.utcnow()))
         await db.commit()

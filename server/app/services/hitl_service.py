@@ -48,7 +48,7 @@ class HitlService:
 
         review = await db.get(ReviewItem, review_id)
         db.add(MessageLifecycleEntry(
-            message_id=review.message_id, code="review_approved" if action == "approve" else "review_rejected",
+            tenant_id=review.tenant_id, message_id=review.message_id, code="review_approved" if action == "approve" else "review_rejected",
             detail=(reviewer_id or "")[:1000]))
         message = await db.get(Message, review.message_id)
         if message:
@@ -84,6 +84,7 @@ class HitlService:
                 )
             if action == "approve" and message.direction == "outbound":
                 db.add(OutboundJob(
+                    tenant_id=message.tenant_id,
                     id=f"out_{uuid.uuid4().hex[:24]}",
                     message_id=message.id,
                     status="pending",
@@ -120,13 +121,13 @@ class HitlService:
             }
             if message.direction == "outbound":
                 await ws_manager.send_agent_message(message.agent_email, "email.queued", msg_payload)
-                await ws_manager.broadcast_event("email.queued", msg_payload)
+                await ws_manager.broadcast_event(message.tenant_id, "email.queued", msg_payload)
             else:
                 await ws_manager.send_agent_message(message.agent_email, "email.received", msg_payload)
-                await ws_manager.broadcast_event("email.received", msg_payload)
+                await ws_manager.broadcast_event(message.tenant_id, "email.received", msg_payload)
 
         # Broadcast review resolved
-        await ws_manager.broadcast_event("review.resolved", {
+        await ws_manager.broadcast_event(review.tenant_id, "review.resolved", {
             "review_id": review.id,
             "message_id": review.message_id,
             "status": review.status,

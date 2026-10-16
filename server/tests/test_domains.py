@@ -111,7 +111,7 @@ async def test_spf_include_setting(client, dns, monkeypatch):
 
 async def test_legacy_placeholder_domain_cannot_be_verified(client, dns):
     async with AsyncSessionLocal() as db:
-        db.add(Domain(id="dom_old", domain="old.example.com", mx_record="10 mx", spf_record="v=spf1", dkim_record="p=...",
+        db.add(Domain(tenant_id="default", id="dom_old", domain="old.example.com", mx_record="10 mx", spf_record="v=spf1", dkim_record="p=...",
                       dmarc_record="v=DMARC1"))
         await db.commit()
     assert (await client.post("/v1/domains/old.example.com/verify", headers=ADMIN)).status_code == 409
@@ -133,13 +133,13 @@ async def test_registration_refused_without_encryption_key(client, monkeypatch):
 async def test_signing_params_only_for_verified_domain(client, dns):
     rec = await register(client)
     async with AsyncSessionLocal() as db:
-        assert await EmailService._dkim_signing_for(db, f"bot@{D}") is None  # pending
+        assert await EmailService._dkim_signing_for(db, f"bot@{D}", "default") is None  # pending
     publish(dns, rec)
     await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)
     async with AsyncSessionLocal() as db:
-        params = await EmailService._dkim_signing_for(db, f"bot@{D}")
+        params = await EmailService._dkim_signing_for(db, f"bot@{D}", "default")
         assert params["domain"] == D and params["selector"] == "oae1" and "BEGIN" in params["private_key"]
-        assert await EmailService._dkim_signing_for(db, "bot@other.org") is None
+        assert await EmailService._dkim_signing_for(db, "bot@other.org", "default") is None
 
 
 async def test_signed_message_verifies_against_published_key(client, dns, monkeypatch):
@@ -148,7 +148,7 @@ async def test_signed_message_verifies_against_published_key(client, dns, monkey
     publish(dns, rec)
     await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)
     async with AsyncSessionLocal() as db:
-        params = await EmailService._dkim_signing_for(db, f"bot@{D}")
+        params = await EmailService._dkim_signing_for(db, f"bot@{D}", "default")
 
     sent = {}
 
@@ -200,7 +200,7 @@ async def test_signature_survives_a_relay_that_rewrites_message_id_and_date(clie
     publish(dns, rec)
     await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)
     async with AsyncSessionLocal() as db:
-        params = await EmailService._dkim_signing_for(db, f"bot@{D}")
+        params = await EmailService._dkim_signing_for(db, f"bot@{D}", "default")
     sent = {}
 
     class FakeSMTP:

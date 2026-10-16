@@ -280,7 +280,7 @@ async def live_dashboard_websocket(websocket: WebSocket):
     if not principal.is_admin:
         await websocket.close(code=1008)
         return
-    await ws_manager.connect_broadcast(websocket)
+    await ws_manager.connect_broadcast(websocket, principal.tenant_id)
     try:
         while True:
             data = await websocket.receive_text()

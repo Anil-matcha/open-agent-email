@@ -16,7 +16,8 @@ class ConnectionManager:
         # agent_email -> set of active WebSockets
         self.agent_connections: Dict[str, Set[WebSocket]] = {}
         # global dashboard listeners
-        self.broadcast_connections: Set[WebSocket] = set()
+        # websocket -> tenant it may see; a feed never carries another tenant's events
+        self.broadcast_connections: Dict[WebSocket, str] = {}
 
     async def connect_agent(self, email: str, websocket: WebSocket):
         await websocket.accept()
@@ -38,13 +39,13 @@ class ConnectionManager:
                 del self.agent_connections[email]
         logger.info(f"WebSocket disconnected for agent: {email}")
 
-    async def connect_broadcast(self, websocket: WebSocket):
+    async def connect_broadcast(self, websocket: WebSocket, tenant_id: str):
         await websocket.accept()
-        self.broadcast_connections.add(websocket)
+        self.broadcast_connections[websocket] = tenant_id
         logger.info("WebSocket connected to global broadcast stream")
 
     def disconnect_broadcast(self, websocket: WebSocket):
-        self.broadcast_connections.discard(websocket)
+        self.broadcast_connections.pop(websocket, None)
         logger.info("WebSocket disconnected from global broadcast stream")
 
     async def send_agent_message(self, email: str, event_type: str, data: dict):
@@ -57,9 +58,11 @@ class ConnectionManager:
                     logger.warning(f"Failed to send to agent {email} WS: {e}")
                     self.disconnect_agent(email, ws)
 
-    async def broadcast_event(self, event_type: str, data: dict):
+    async def broadcast_event(self, tenant_id: str, event_type: str, data: dict):
         payload = json.dumps({"type": event_type, "data": data})
-        for ws in list(self.broadcast_connections):
+        for ws, ws_tenant in list(self.broadcast_connections.items()):
+            if ws_tenant != tenant_id:
+                continue
             try:
                 await ws.send_text(payload)
             except Exception as e:

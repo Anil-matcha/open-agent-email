@@ -35,7 +35,7 @@ async def test_close_all_sends_shutdown_code_to_every_socket_and_continues_past_
         sockets.append(ws)
     await manager.connect_agent("a@agents.local", sockets[0])
     await manager.connect_agent("b@agents.local", sockets[1])
-    await manager.connect_broadcast(sockets[2])
+    await manager.connect_broadcast(sockets[2], "default")
     sockets[0].close.side_effect = RuntimeError("already gone")
 
     await manager.close_all(code=1001, reason="shutting_down")

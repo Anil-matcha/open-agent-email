@@ -66,7 +66,7 @@ def test_dmarc_exposes_flattened_policy_and_per_signature_alignment(monkeypatch)
 
 
 def test_message_authentication_supports_legacy_and_structured_evidence():
-    message = Message(spf_status="pass", dkim_status="pass", dmarc_status="pass")
+    message = Message(tenant_id="default", spf_status="pass", dkim_status="pass", dmarc_status="pass")
     message.auth_evidence = {
         "spf": {"status": "pass", "identity": "sender@example.com"},
         "dkim": {"status": "pass", "passing_domains": ["example.com"]},

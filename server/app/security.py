@@ -12,14 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import Agent, ApiKey
+from app.tenancy import DEFAULT_TENANT_ID, bind_tenant, get_principal_resolvers, get_token_extractors, validate_tenant_id
 
 
 @dataclass(frozen=True)
 class Principal:
+    """An authenticated caller. ``is_admin`` means administrator of its own tenant only."""
+
+    tenant_id: str
     is_admin: bool
     scope: str = ""
     agent_email: str | None = None
     principal_id: str = ""
+
+    def __post_init__(self):
+        validate_tenant_id(self.tenant_id)
 
 
 def _unauthorized() -> HTTPException:
@@ -38,20 +45,38 @@ async def get_principal(
     scheme, _, token = authorization.partition(" ")
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
-        raise _unauthorized()
+        for extractor in get_token_extractors():
+            token = (extractor(request) or "").strip()
+            if token:
+                break
+        else:
+            raise _unauthorized()
 
     return await authenticate_token(token, db)
 
 
 async def authenticate_token(token: str, db: AsyncSession) -> Principal:
+    """Resolve a credential to a principal and bind ``db`` to the principal's tenant."""
+    principal = await _resolve_principal(token, db)
+    bind_tenant(db, principal.tenant_id)
+    return principal
+
+
+async def _resolve_principal(token: str, db: AsyncSession) -> Principal:
     admin_token = settings.ADMIN_API_KEY.strip()
     if admin_token and hmac.compare_digest(token, admin_token):
         token_id = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
-        return Principal(is_admin=True, principal_id=f"admin:{token_id}")
+        return Principal(tenant_id=DEFAULT_TENANT_ID, is_admin=True, principal_id=f"admin:{token_id}")
 
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     result = await db.execute(select(ApiKey).where(ApiKey.key_hash == token_hash))
     api_key = result.scalar_one_or_none()
+    if api_key is None:
+        # Credentials understood by a hosted layer (accounts, sessions). A resolver may raise to reject.
+        for resolver in get_principal_resolvers():
+            resolved = await resolver(token, db)
+            if resolved is not None:
+                return resolved
     if (
         not api_key
         or (api_key.expires_at is not None and api_key.expires_at <= datetime.datetime.utcnow())
@@ -63,14 +88,16 @@ async def authenticate_token(token: str, db: AsyncSession) -> Principal:
 
     # Keys of a soft-deleted inbox stop working until it is restored.
     if api_key.scope == "account":
-        return Principal(is_admin=True, scope="account", principal_id=f"api_key:{api_key.id}")
+        return Principal(tenant_id=api_key.tenant_id, is_admin=True, scope="account", principal_id=f"api_key:{api_key.id}")
 
     if api_key.agent_email:
-        owner_deleted = await db.scalar(select(Agent.deleted_at).where(Agent.email == api_key.agent_email))
+        owner_deleted = await db.scalar(select(Agent.deleted_at).where(
+            Agent.email == api_key.agent_email, Agent.tenant_id == api_key.tenant_id))
         if owner_deleted is not None:
             raise _unauthorized()
 
     return Principal(
+        tenant_id=api_key.tenant_id,
         is_admin=False,
         scope="full_access" if api_key.scope == "agent" else api_key.scope,
         agent_email=api_key.agent_email,
