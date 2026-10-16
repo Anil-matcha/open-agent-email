@@ -103,6 +103,32 @@ def get_token_extractors() -> List[TokenExtractor]:
     return list(_token_extractors)
 
 
+# --- tenant state ---------------------------------------------------------------------------------
+
+# resolver(db, tenant_id) -> reason | None. A reason marks the tenant suspended: its credentials still
+# authenticate and can read, but every write is refused. The core has no resolver of its own.
+TenantStateResolver = Callable[["AsyncSession", str], Awaitable[Optional[str]]]
+_tenant_state_resolvers: List[TenantStateResolver] = []
+
+
+def register_tenant_state_resolver(resolver: TenantStateResolver) -> None:
+    if resolver not in _tenant_state_resolvers:
+        _tenant_state_resolvers.append(resolver)
+
+
+def unregister_tenant_state_resolver(resolver: TenantStateResolver) -> None:
+    if resolver in _tenant_state_resolvers:
+        _tenant_state_resolvers.remove(resolver)
+
+
+async def tenant_suspension(db: "AsyncSession", tenant_id: str) -> Optional[str]:
+    for resolver in list(_tenant_state_resolvers):
+        reason = await resolver(db, tenant_id)
+        if reason:
+            return reason
+    return None
+
+
 # --- policies a hosted layer can enforce ------------------------------------------------------------
 
 # A policy is an async callable taking keyword context; it raises HTTPException to refuse. The core calls

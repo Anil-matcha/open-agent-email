@@ -346,6 +346,8 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         raise PermissionError("Reviewer credentials are limited to review tools")
     if name in admin_tools and not principal.is_admin:
         raise PermissionError("Administrator token required")
+    if principal.suspended and name != "whoami" and not name.startswith(("list_", "get_")):
+        raise PermissionError(f"Account suspended: {principal.suspended}")
     if name in OPERATOR_TOOLS and principal.tenant_id != DEFAULT_TENANT_ID:
         raise PermissionError("Server operator credential required")
     if name in review_tools and not principal.is_admin and principal.scope != "reviewer":

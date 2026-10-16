@@ -902,3 +902,48 @@ async def test_a_refused_auto_reply_does_not_fail_inbound_delivery(client, world
         assert message.status == "delivered"
     finally:
         unregister_policy("message.send", refuse_send)
+
+
+# --- suspended tenants -----------------------------------------------------------------------------
+
+async def test_a_suspended_tenant_can_read_but_not_write(client, world):
+    from app.tenancy import register_tenant_state_resolver, unregister_tenant_state_resolver
+    a, b = world
+    stored_key = {"Authorization": f"Bearer {a.ids['agent_key']}"}
+
+    async def resolver(db, tenant_id):
+        return "under review" if tenant_id == TENANT_A else None
+
+    async def mcp(headers, name, **args):
+        r = await client.post("/mcp/rpc", headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
+        return r.json()["result"]["content"][0]["text"]
+
+    register_tenant_state_resolver(resolver)
+    try:
+        before = await _snapshot(TENANT_A)
+        # Reads keep working for every credential of the tenant.
+        assert (await client.get("/v1/agents", headers=A_HEADERS)).status_code == 200
+        assert (await client.get(f"/v1/agents/{a.email}/messages", headers=stored_key)).status_code == 200
+        assert a.email in await mcp(A_HEADERS, "list_agents")
+        # Writes are refused on every route and tool, whoever the credential is.
+        writes = [
+            ("post", "/v1/agents", {"email": "new@agents.example.com", "display_name": "n"}),
+            ("patch", f"/v1/agents/{a.email}", {"display_name": "changed"}),
+            ("delete", f"/v1/agents/{a.email}?purge=true", None),
+            ("delete", f"/v1/webhooks/{a.ids['endpoint_id']}", None),
+            ("post", "/v1/domains", {"domain": "x-a.example"}),
+            ("delete", f"/v1/agents/{a.email}/messages/{a.ids['message_id']}?permanent=true&confirm=DELETE", None),
+        ]
+        for method, path, body in writes:
+            for headers in (A_HEADERS, stored_key):
+                r = await client.request(method.upper(), path, headers=headers, **({"json": body} if body else {}))
+                assert r.status_code == 403, (method, path, r.status_code)
+        assert "suspended" in (await mcp(A_HEADERS, "delete_agent", agent_email=a.email, purge=True)).lower()
+        assert "suspended" in (await mcp(A_HEADERS, "create_agent", email="m@agents.example.com")).lower()
+        assert await _snapshot(TENANT_A) == before
+        # Other tenants are untouched.
+        assert (await client.post("/v1/domains", headers=B_HEADERS, json={"domain": "x-b.example"})).status_code == 201
+    finally:
+        unregister_tenant_state_resolver(resolver)
+    assert (await client.post("/v1/domains", headers=A_HEADERS, json={"domain": "x-a.example"})).status_code == 201

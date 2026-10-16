@@ -1,6 +1,6 @@
 """Authentication and authorization dependencies for the API and MCP gateway."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import datetime
 import hashlib
 import hmac
@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import Agent, ApiKey
-from app.tenancy import DEFAULT_TENANT_ID, bind_tenant, get_principal_resolvers, get_token_extractors, validate_tenant_id
+from app.tenancy import (
+    DEFAULT_TENANT_ID, bind_tenant, get_principal_resolvers, get_token_extractors, tenant_suspension, validate_tenant_id,
+)
 
 
 @dataclass(frozen=True)
@@ -24,9 +26,14 @@ class Principal:
     scope: str = ""
     agent_email: str | None = None
     principal_id: str = ""
+    # Set when the tenant is suspended: reads still work, writes are refused (see get_principal).
+    suspended: str | None = None
 
     def __post_init__(self):
         validate_tenant_id(self.tenant_id)
+
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 def _unauthorized() -> HTTPException:
@@ -52,14 +59,19 @@ async def get_principal(
         else:
             raise _unauthorized()
 
-    return await authenticate_token(token, db)
+    principal = await authenticate_token(token, db)
+    if principal.suspended and request.method not in SAFE_METHODS and not request.url.path.startswith("/mcp"):
+        # MCP is one POST endpoint for reads and writes; execute_mcp_tool applies the same rule per tool.
+        raise HTTPException(status_code=403, detail=f"Account suspended: {principal.suspended}")
+    return principal
 
 
 async def authenticate_token(token: str, db: AsyncSession) -> Principal:
     """Resolve a credential to a principal and bind ``db`` to the principal's tenant."""
     principal = await _resolve_principal(token, db)
     bind_tenant(db, principal.tenant_id)
-    return principal
+    reason = await tenant_suspension(db, principal.tenant_id)
+    return replace(principal, suspended=reason) if reason else principal
 
 
 async def _resolve_principal(token: str, db: AsyncSession) -> Principal:
