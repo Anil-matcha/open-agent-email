@@ -50,6 +50,7 @@ export function Sidebar() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [inboxCount, setInboxCount] = useState<number | null>(null);
   const [settingsTab, setSettingsTab] = useState("mail");
+  const [extraNav, setExtraNav] = useState<{ items: { name: string; href: string }[]; hide: string[] }>({ items: [], hide: [] });
 
   // Poll, refresh on every navigation, when the tab regains focus, and when a screen asks for it.
   useEffect(() => {
@@ -78,6 +79,13 @@ export function Sidebar() {
       window.removeEventListener("focus", run);
       window.removeEventListener(BADGE_REFRESH_EVENT, run);
     };
+  }, [pathname]);
+
+  useEffect(() => {
+    fetch("/api/extra-nav", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setExtraNav({ items: Array.isArray(d.items) ? d.items : [], hide: Array.isArray(d.hide) ? d.hide : [] }))
+      .catch(() => undefined);
   }, [pathname]);
 
   const needsSetup = inboxCount === 0;
@@ -137,9 +145,12 @@ export function Sidebar() {
       items: [
         { name: "Account", href: "/account", icon: UserRound },
         { name: "MCP Gateway", href: "/mcp", icon: Cpu },
+        ...extraNav.items.map((item) => ({ ...item, icon: UserRound })),
       ],
     },
-  ];
+  ]
+    .map((group) => ({ ...group, items: group.items.filter((item) => !extraNav.hide.includes(item.href)) }))
+    .filter((group) => group.items.length > 0);
 
   // "Messages" and "Inboxes" share /inbox; let only the more specific entry claim it.
   const isActive = (item: NavItem) => {
