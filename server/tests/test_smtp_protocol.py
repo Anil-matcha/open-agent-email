@@ -106,6 +106,7 @@ async def test_ehlo_mail_rcpt_data_and_mime_attachments(client, smtp_listener, m
         "content_type": "application/octet-stream",
         "content": b"file-data",
     }]
+    assert b"Subject: Protocol test" in deliveries[0]["raw_message"]
 
 
 async def test_dmarc_reject_policy_returns_550_without_persistence(client, smtp_listener, monkeypatch):
