@@ -34,6 +34,7 @@ from app.services.webhook_events import (
 )
 from app.services.attachment_utils import validate_composed_message_size
 from app.services.attachment_scan import scan_attachments
+from app.services import agent_mail_gate
 from app.services.recipient_suppressions import canonicalize_recipient, get_recipient_suppression
 from app.services.unsubscribe import issue_token, public_base_url
 from app.database import AsyncSessionLocal
@@ -353,10 +354,12 @@ class EmailService:
         references: Optional[str] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
         force_review: bool = False,
+        raw_message: Optional[bytes] = None,
     ) -> Tuple[Message, ThreatScanResult, Optional[ReviewItem]]:
         """
         Processes inbound email:
-        1. Evaluates Threat & Prompt Injection via ThreatScanner
+        1. Evaluates Threat & Prompt Injection via ThreatScanner, then the optional
+           agent-mail-gate screen on the raw message (it can only make the verdict stricter)
         2. Applies Agent's sensitivity and HITL rules
         3. Creates Message & optionally ReviewItem
         4. Broadcasts over WebSockets
@@ -370,6 +373,7 @@ class EmailService:
             body_html=body_html,
             sensitivity=agent.threat_sensitivity
         )
+        scan_result = await agent_mail_gate.apply(raw_message, agent.threat_sensitivity, scan_result)
 
         if inbound_dedup_hash:
             existing_result = await db.execute(select(Message).where(

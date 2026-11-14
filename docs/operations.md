@@ -80,6 +80,28 @@ The server sends attachment bytes through clamd's `INSTREAM` protocol without cr
 
 This scans file bytes for signatures recognized by the installed ClamAV database. It does not replace the separate prompt-injection checks on message text, and it cannot guarantee detection of zero-day or otherwise unknown malware.
 
+## Optional agent-mail-gate inbound screen
+
+[agent-mail-gate](https://github.com/CyberNative-AI/agent-mail-gate) (MIT) is a deterministic screen that reads the raw message, so it sees headers the body scanner does not. No model call is made. It holds a message for review when it claims one of your protected domains without verification, when a near-miss spelling of a protected domain, a risky link or a Reply-To that differs from From comes with a credential, account or payment lure, and when it carries a dangerous attachment, a verification code or injection text. It trashes a message only when a dangerous attachment, a lure and a risky link agree.
+
+It is disabled by default. To enable it, install the package into the server environment (or image) and point the server at its config file:
+
+```bash
+pip install "agent-mail-gate @ git+https://github.com/CyberNative-AI/agent-mail-gate@f6aa03b171d1df08e44eaa50c4d21642ad4f170e"
+```
+
+```toml
+# /etc/agent-mail-gate/gate.toml (only the [screening] table is read here)
+[screening]
+protected_domains = ["example.com"]
+```
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_MAIL_GATE_CONFIG` | empty | Path to the agent-mail-gate TOML file. Empty disables the screen. |
+
+The screen runs on SMTP intake after the body scanner and can only make the verdict stricter: `quarantine` holds the message for review (even when the inbox has review turned off), `trash` blocks it, and `clean` keeps the body scanner's verdict. Its reasons appear in the message's threat details as `agent_mail_gate`. An inbox with threat sensitivity `off` skips it. This server is the receiving MTA, so the raw message carries no `Authentication-Results` header from a provider you trust: every message that claims a protected domain is held for review, including your own colleagues' mail. List only domains whose inbound mail you want a person to see first. If the setting is present but the package or file cannot be loaded, the SMTP listener does not start and the startup log says why.
+
 ## Webhook event retention
 
 `WEBHOOK_DELIVERY_RETENTION_DAYS` defaults to 30. The delivery worker erases payloads, retry errors, replay metadata, and leases for older delivered or terminally failed events, while keeping a compact event ID tombstone. Listing excludes expired tombstones; `GET /v1/events/{id}` and replay return HTTP 410 after expiry. Endpoint deletion removes its deliveries and tombstones.

@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     ATTACHMENT_SCAN_MAX_BYTES: int = 25 * 1024 * 1024
     ATTACHMENT_SCAN_MAX_CONCURRENT: int = 4
     ATTACHMENT_SCAN_CHUNK_BYTES: int = 64 * 1024
+    # Optional agent-mail-gate inbound screen: path to its TOML config. Empty disables it.
+    AGENT_MAIL_GATE_CONFIG: str = ""
     # Dedicated key is preferred. Existing required server secrets are fallback keys
     # so upgrades do not require an extra setting.
     ATTACHMENT_URL_SIGNING_KEY: str = ""

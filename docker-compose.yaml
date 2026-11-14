@@ -28,6 +28,7 @@ services:
       - ATTACHMENT_SCAN_MAX_BYTES=${ATTACHMENT_SCAN_MAX_BYTES:-26214400}
       - ATTACHMENT_SCAN_MAX_CONCURRENT=${ATTACHMENT_SCAN_MAX_CONCURRENT:-4}
       - ATTACHMENT_SCAN_CHUNK_BYTES=${ATTACHMENT_SCAN_CHUNK_BYTES:-65536}
+      - AGENT_MAIL_GATE_CONFIG=${AGENT_MAIL_GATE_CONFIG:-}
     volumes:
       - oae-data:/data
       # Optional one-time import of a database from the old layout; see docs/operations.md.
