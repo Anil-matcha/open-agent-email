@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator, model_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta, timezone
 
 MAX_SEND_AT_DAYS = 90
@@ -418,7 +418,14 @@ class MessageAttachmentInput(BaseModel):
 
 
 class MessageSendRequest(BaseModel):
-    recipient: str = Field(..., min_length=3, max_length=320, example="customer@example.com")
+    to: Optional[Union[str, List[str]]] = Field(
+        None, example=["customer@example.com"],
+        description="One address or a list of visible To addresses; at most 50 unique recipients in to, cc and bcc")
+    cc: List[str] = Field(default_factory=list, max_length=50, description="Visible Cc addresses")
+    bcc: List[str] = Field(default_factory=list, max_length=50,
+                           description="Blind copies: in the SMTP envelope only, never in a header")
+    recipient: Optional[str] = Field(None, min_length=3, max_length=320,
+                                     description="Legacy single To address; use `to`")
     subject: Optional[str] = Field(None, max_length=512, example="Update on your support ticket #492")
     body_text: Optional[str] = Field(None, max_length=100_000, example="Hello! We have reviewed your inquiry and resolved the issue.")
     body_html: Optional[str] = None
@@ -434,8 +441,8 @@ class MessageSendRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _input_aliases(cls, data):
-        """Also accepts `to`, `text` and `html` for `recipient`, `body_text` and `body_html`."""
-        return _apply_input_aliases(data, _SEND_ALIASES)
+        """Also accepts `text` and `html` for `body_text` and `body_html`."""
+        return _apply_input_aliases(data, _REPLY_ALIASES)
 
     @field_validator("scheduled_at", "send_at")
     @classmethod
@@ -447,6 +454,14 @@ class MessageSendRequest(BaseModel):
         if self.scheduled_at is not None and self.send_at is not None and self.scheduled_at != self.send_at:
             raise ValueError("scheduled_at and send_at must match when both are provided")
         self.scheduled_at = self.scheduled_at or self.send_at
+        to = [self.to] if isinstance(self.to, str) else self.to
+        if to is None:
+            if self.recipient is None:
+                raise ValueError("to is required")
+            to = [self.recipient]
+        elif self.recipient is not None and to != [self.recipient]:
+            raise ValueError("to and recipient must match when both are provided")
+        self.to = to
         return self
 
 class MessageReplyRequest(BaseModel):
@@ -459,7 +474,9 @@ class MessageReplyRequest(BaseModel):
     attachments: Optional[List[MessageAttachmentInput]] = None
     scheduled_at: Optional[datetime] = Field(None, description="Defer submission until this offset-qualified time (at most 90 days ahead)")
     send_at: Optional[datetime] = Field(None, description="Deprecated alias for scheduled_at")
-    reply_all: bool = Field(False, description="Accepted for client compatibility; messages have a single recipient, so true is rejected")
+    reply_all: bool = Field(False, description="Also address the original visible To and Cc (own address excluded, Bcc never copied)")
+    cc: List[str] = Field(default_factory=list, max_length=50, description="Additional visible Cc addresses")
+    bcc: List[str] = Field(default_factory=list, max_length=50, description="Additional blind copies")
 
     @model_validator(mode="before")
     @classmethod
@@ -492,6 +509,20 @@ class MessageForwardRequest(BaseModel):
         """Also accepts `to`, `text` and `html` for `recipient`, `body_text` and `body_html`."""
         return _apply_input_aliases(data, _SEND_ALIASES)
 
+class MessageDeliveryResponse(BaseModel):
+    address: str
+    kind: str
+    status: str
+    detail: Optional[str] = None
+    attempts: int
+    provider_delivery_status: Optional[str] = None
+    provider_delivery_error: Optional[str] = None
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class MessageResponse(BaseModel):
     id: str
     agent_email: str
@@ -499,6 +530,12 @@ class MessageResponse(BaseModel):
     is_read: bool
     sender: str
     recipient: str
+    to: List[str] = Field(default_factory=list)
+    cc: List[str] = Field(default_factory=list)
+    bcc: List[str] = Field(default_factory=list, description="Only on the sender's own outbound copy")
+    reply_to: List[str] = Field(default_factory=list)
+    deliveries: List[MessageDeliveryResponse] = Field(default_factory=list,
+                                                      description="Per-recipient outcome of an outbound message")
     subject: str
     body_text: str
     body_html: Optional[str]
@@ -525,6 +562,11 @@ class MessageResponse(BaseModel):
     scheduled_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
     created_at: datetime
+
+    @field_validator("reply_to", mode="before")
+    @classmethod
+    def _none_is_empty(cls, value):
+        return value or []
 
     class Config:
         from_attributes = True

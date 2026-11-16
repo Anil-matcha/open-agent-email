@@ -25,7 +25,7 @@ def _summary(thread_id: str, messages: List[Message]) -> dict:
     messages = sorted(messages, key=lambda m: m.created_at)
     participants = []
     for m in messages:
-        for address in (m.sender, m.recipient):
+        for address in (m.sender, *m.to, *m.cc):
             if address not in participants:
                 participants.append(address)
     return {

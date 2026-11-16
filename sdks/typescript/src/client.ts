@@ -309,7 +309,7 @@ export class AgentEmailClient {
     messages: {
       send: (inbox: string, opts: T.ShortSendOptions, ro?: T.RequestOptions) => {
         const { to, text, html, ...rest } = opts;
-        return this.messages.send(inbox, { ...rest, recipient: to, body_text: text, body_html: html }, ro);
+        return this.messages.send(inbox, { ...rest, to, body_text: text, body_html: html }, ro);
       },
       list: (inbox: string, params: T.ShortMessageListParams = {}) => {
         const { pageToken, query, ...rest } = params;
@@ -322,8 +322,7 @@ export class AgentEmailClient {
       get: (inbox: string, id: string) => this.messages.get(inbox, id),
       reply: (inbox: string, id: string, opts: T.ShortReplyOptions, ro?: T.RequestOptions) => {
         const { text, html, replyAll, ...rest } = opts;
-        if (replyAll) throw new TypeError("replyAll is not supported: messages have a single recipient");
-        return this.messages.reply(inbox, id, { ...rest, body_text: text, body_html: html }, ro);
+        return this.messages.reply(inbox, id, { ...rest, body_text: text, body_html: html, reply_all: replyAll || undefined }, ro);
       },
       forward: (inbox: string, id: string, opts: { to: string; note?: string }) => this.messages.forward(inbox, id, opts.to, opts.note),
       update: (inbox: string, id: string, changes: T.LabelChanges) => {

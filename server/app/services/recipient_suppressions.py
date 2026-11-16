@@ -14,7 +14,8 @@ def normalize_recipient(email: str) -> str:
 
 def canonicalize_recipient(value: str) -> str:
     """Parse exactly one mailbox and return its normalized address only."""
-    if not isinstance(value, str) or not value.strip() or len(value) > 320:
+    if (not isinstance(value, str) or not value.strip() or len(value) > 320
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
         raise ValueError("Enter exactly one valid recipient email address")
     try:
         try:
@@ -34,6 +35,37 @@ def canonicalize_recipient(value: str) -> str:
     if len(normalized) > 255:
         raise ValueError("Recipient email address must be at most 255 characters")
     return normalized
+
+
+MAX_RECIPIENTS = 50  # Amazon SES accepts at most 50 recipients per message.
+
+
+def canonicalize_recipient_lists(to, cc=None, bcc=None) -> tuple[list[str], list[str], list[str]]:
+    """Canonicalize To/Cc/Bcc, dropping case-insensitive duplicates (to wins over cc over bcc)."""
+    seen: set[str] = set()
+    lists = []
+    for field, values in (("to", to), ("cc", cc), ("bcc", bcc)):
+        if values is None:
+            values = []
+        elif isinstance(values, str):
+            values = [values]
+        if not isinstance(values, (list, tuple)):
+            raise ValueError(f"{field} must be an email address or a list of email addresses")
+        kept = []
+        for value in values:
+            try:
+                address = canonicalize_recipient(value)
+            except ValueError as exc:
+                raise ValueError(str(exc) if field == "to" else f"{field}: {exc}") from exc
+            if address not in seen:
+                seen.add(address)
+                kept.append(address)
+        lists.append(kept)
+    if not lists[0]:
+        raise ValueError("At least one To recipient is required")
+    if len(seen) > MAX_RECIPIENTS:
+        raise ValueError(f"A message can have at most {MAX_RECIPIENTS} recipients across to, cc and bcc")
+    return lists[0], lists[1], lists[2]
 
 
 async def get_recipient_suppression(

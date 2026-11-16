@@ -1,6 +1,6 @@
 export type MessageStatus =
   | "delivered" | "accepted_by_relay" | "sending" | "scheduled" | "canceled" | "delivery_unknown"
-  | "pending_review" | "rejected" | "blocked" | "failed";
+  | "partially_failed" | "pending_review" | "rejected" | "blocked" | "failed";
 export type Scope = "read_only" | "full_access" | "reviewer";
 export type AccountKeyScope = "account" | "agent";
 
@@ -9,6 +9,10 @@ export interface Attachment { filename: string; content_type: string; content_ba
 export interface Message {
   id: string; agent_email: string; direction: "inbound" | "outbound"; is_read: boolean;
   sender: string; recipient: string; subject: string; body_text: string; body_html: string | null;
+  /** Visible To/Cc; `bcc` only on the sender's own outbound copy. */
+  to: string[]; cc: string[]; bcc: string[]; reply_to: string[];
+  /** Per-recipient outcome of an outbound message. */
+  deliveries: MessageDelivery[];
   thread_id: string; conversation_id?: string | null; rfc_message_id: string; in_reply_to: string | null; references: string | null;
   spf_status: string; dkim_status: string; dmarc_status: string; verified_domain: string | null;
   auth_evidence?: Record<string, unknown> | null;
@@ -16,11 +20,23 @@ export interface Message {
   delivery_error?: string | null; threat_score: number; threat_details: string;
   labels: string[]; scheduled_for: string | null; scheduled_at: string | null; deleted_at: string | null; created_at: string;
 }
+export interface MessageDelivery {
+  address: string; kind: "to" | "cc" | "bcc";
+  status: "pending" | "sending" | "accepted_by_relay" | "delivered" | "failed" | "blocked" | "delivery_unknown";
+  detail: string | null; attempts: number; provider_delivery_status: string | null; provider_delivery_error: string | null;
+  updated_at: string;
+}
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface OtpResult { found: boolean; code?: string; message_id?: string; received_at?: string; sender?: string; subject?: string }
 
 export interface SendOptions {
-  recipient: string; subject?: string; body_text?: string; body_html?: string;
+  /** One address or a list (at most 50 unique recipients across to, cc and bcc). */
+  to?: string | string[];
+  cc?: string[];
+  /** Blind copies: SMTP envelope only, never in a header. */
+  bcc?: string[];
+  /** Legacy single-address form of `to`. */
+  recipient?: string; subject?: string; body_text?: string; body_html?: string;
   template_id?: string; template_data?: Record<string, unknown>; thread_id?: string; conversation_id?: string;
   attachments?: Attachment[];
   /** Defer submission (offset-qualified ISO string or Date, at most 90 days ahead). */
@@ -32,11 +48,13 @@ export interface ReplyOptions {
   body_text?: string; body_html?: string; template_id?: string; template_data?: Record<string, unknown>;
   conversation_id?: string; attachments?: Attachment[]; scheduled_at?: string | Date;
   /** @deprecated Use scheduled_at. */ send_at?: string | Date;
+  /** Also address the original visible To and Cc (own address excluded, Bcc never copied). */
+  reply_all?: boolean; cc?: string[]; bcc?: string[];
 }
 /** Short-name form of {@link SendOptions}: `to`, `text` and `html` instead of `recipient`, `body_text` and `body_html`. */
-export type ShortSendOptions = Omit<SendOptions, "recipient" | "body_text" | "body_html"> & { to: string; text?: string; html?: string };
-/** Short-name form of {@link ReplyOptions}. Messages have a single recipient, so `replyAll` is rejected. */
-export type ShortReplyOptions = Omit<ReplyOptions, "body_text" | "body_html"> & { text?: string; html?: string; replyAll?: boolean };
+export type ShortSendOptions = Omit<SendOptions, "recipient" | "to" | "body_text" | "body_html"> & { to: string | string[]; text?: string; html?: string };
+/** Short-name form of {@link ReplyOptions}: `replyAll` for `reply_all`. */
+export type ShortReplyOptions = Omit<ReplyOptions, "body_text" | "body_html" | "reply_all"> & { text?: string; html?: string; replyAll?: boolean };
 export interface ShortPageParams { limit?: number; pageToken?: string }
 export type ShortMessageListParams = Omit<MessagePageParams, "cursor" | "limit" | "q"> & { limit?: number; pageToken?: string; query?: string };
 export interface LabelChanges { addLabels?: string[]; removeLabels?: string[]; labels?: string[] }
