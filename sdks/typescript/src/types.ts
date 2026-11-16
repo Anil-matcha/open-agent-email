@@ -24,7 +24,7 @@ export interface MessageDelivery {
   address: string; kind: "to" | "cc" | "bcc";
   status: "pending" | "sending" | "accepted_by_relay" | "delivered" | "failed" | "blocked" | "delivery_unknown";
   detail: string | null; attempts: number; provider_delivery_status: string | null; provider_delivery_error: string | null;
-  updated_at: string;
+  relay_message_id?: string | null; updated_at: string;
 }
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface OtpResult { found: boolean; code?: string; message_id?: string; received_at?: string; sender?: string; subject?: string }
