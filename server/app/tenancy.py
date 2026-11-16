@@ -135,7 +135,7 @@ async def tenant_suspension(db: "AsyncSession", tenant_id: str) -> Optional[str]
 # them at the moments below and has no policies of its own, so a single-tenant install is never restricted.
 #   inbox.create   db, tenant_id, address
 #   domain.create  db, tenant_id, domain
-#   message.send   db, tenant_id, agent, recipient
+#   message.send   db, tenant_id, agent, recipient (first To), recipients (every To, Cc and Bcc address)
 Policy = Callable[..., Awaitable[None]]
 POLICY_EVENTS = ("inbox.create", "domain.create", "message.send")
 _policies: dict = {event: [] for event in POLICY_EVENTS}

@@ -64,8 +64,10 @@ async def review_confirmation(token: str, db: AsyncSession = Depends(get_db)):
     preview = " ".join(message.body_text.split())[:PREVIEW_CHARS]
     content = (
         f"<p><strong>From:</strong> {html.escape(message.sender)}<br>"
-        f"<strong>To:</strong> {html.escape(message.recipient)}<br>"
-        f"<strong>Subject:</strong> {html.escape(message.subject)}</p>"
+        f"<strong>To:</strong> {html.escape(', '.join(message.to))}<br>"
+        + (f"<strong>Cc:</strong> {html.escape(', '.join(message.cc))}<br>" if message.cc else "")
+        + (f"<strong>Bcc:</strong> {html.escape(', '.join(message.bcc))}<br>" if message.bcc else "")
+        + f"<strong>Subject:</strong> {html.escape(message.subject)}</p>"
         f"<pre style=\"white-space:pre-wrap;background:#f4f4f5;padding:1rem;border-radius:.5rem\">{html.escape(preview)}</pre>"
         "<form method=\"post\" action=\"\">"
         f"<button type=\"submit\" name=\"confirm\" value=\"{html.escape(capability.action)}\">{verb}</button></form>"

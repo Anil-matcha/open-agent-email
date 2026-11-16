@@ -11,7 +11,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Message, OutboundJob, OutboundRetryEvent
+from app.models import Message, MessageRecipient, OutboundJob, OutboundRetryEvent
 from app.schemas import OutboundJobPageResponse, OutboundJobResponse, OutboundRetryEventResponse
 from app.security import Principal, require_admin
 from app.services.cursors import decode_cursor, encode_cursor
@@ -143,6 +143,15 @@ async def retry_outbound_job(
     ))
 
     job = await db.get(OutboundJob, job_id)
+    # Accepted and blocked recipients keep their outcome; only the rest is submitted again.
+    # Unknown ones are included because the operator confirmed the duplicate risk above.
+    await db.execute(
+        update(MessageRecipient)
+        .where(MessageRecipient.message_id == job.message_id,
+               MessageRecipient.status.in_(
+                   ("failed", "delivery_unknown", "sending") if previous_status == "uncertain" else ("failed",)))
+        .values(status="pending")
+    )
     message = await db.get(Message, job.message_id)
     if message:
         message.status = "sending"

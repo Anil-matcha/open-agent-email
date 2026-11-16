@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.tenancy import bind_tenant
-from app.models import Message, ProviderFeedbackReceipt, RecipientSuppression
+from app.models import Message, MessageRecipient, ProviderFeedbackReceipt, RecipientSuppression
 from app.services.recipient_suppressions import canonicalize_recipient, get_recipient_suppression
 from app.services.webhook_events import (
     enqueue_domain_suppression_added_webhook_event,
@@ -130,6 +130,13 @@ async def _confirm_subscription(m: dict) -> None:
                 break
 
 
+def _outranks(status: str, current: str | None) -> bool:
+    if current in {"bounced", "complained", "rejected"} and status not in {"bounced", "complained", "rejected"}:
+        return False
+    precedence = {"delayed": 1, "delivered": 2, "rejected": 3, "bounced": 4, "complained": 5}
+    return current is None or precedence.get(status, 0) >= precedence.get(current, 0)
+
+
 async def _apply_feedback(db: AsyncSession, event: dict) -> None:
     event_type = event.get("eventType") or event.get("notificationType")
     if event_type == "Bounce":
@@ -191,26 +198,32 @@ async def _apply_feedback(db: AsyncSession, event: dict) -> None:
         return
     # Everything below acts for the tenant that owns the correlated message.
     bind_tenant(db, message.tenant_id)
+    deliveries = {row.address: row for row in (await db.execute(
+        select(MessageRecipient).where(MessageRecipient.message_id == message.id))).scalars().all()}
+    try:
+        expected = set(deliveries) or {canonicalize_recipient(message.recipient)}
+    except ValueError:
+        return
+    bounded_reason = " ".join(str(reason).split())[:500] if reason else None
     for raw_recipient in recipients:
         if not isinstance(raw_recipient, str):
             continue
         try:
             recipient = canonicalize_recipient(raw_recipient)
-            expected_recipient = canonicalize_recipient(message.recipient)
         except ValueError:
             continue
-        # Only apply an address that exactly matches the correlated outbound message.
-        if recipient != expected_recipient:
+        # Only apply an address that exactly matches an envelope recipient of the correlated message.
+        if recipient not in expected:
             continue
-        current = message.provider_delivery_status
-        # Provider notifications can arrive out of order. Preserve compliance
-        # outcomes over informational success/delay notifications.
-        if current not in {"bounced", "complained", "rejected"} or status in {"bounced", "complained", "rejected"}:
-            precedence = {"delayed": 1, "delivered": 2, "rejected": 3, "bounced": 4, "complained": 5}
-            if current is None or precedence.get(status, 0) >= precedence.get(current, 0):
-                message.provider_delivery_status = status
-                bounded_reason = " ".join(str(reason).split())[:500] if reason else None
-                message.provider_delivery_error = bounded_reason
+        for target in (message, deliveries.get(recipient)):
+            if target is None:
+                continue
+            current = target.provider_delivery_status
+            # Provider notifications can arrive out of order. Preserve compliance
+            # outcomes over informational success/delay notifications.
+            if _outranks(status, current):
+                target.provider_delivery_status = status
+                target.provider_delivery_error = bounded_reason
         await enqueue_outbound_status_webhook_event(
             db,
             event_type=webhook_type,

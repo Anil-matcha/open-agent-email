@@ -1563,6 +1563,84 @@
         "title": "MessageAttachmentResponse",
         "type": "object"
       },
+      "MessageDeliveryResponse": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "provider_delivery_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Delivery Error"
+          },
+          "provider_delivery_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Delivery Status"
+          },
+          "relay_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relay Message Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "kind",
+          "status",
+          "attempts",
+          "updated_at"
+        ],
+        "title": "MessageDeliveryResponse",
+        "type": "object"
+      },
       "MessageForwardRequest": {
         "properties": {
           "attachments": {
@@ -1728,6 +1806,15 @@
             ],
             "title": "Attachments"
           },
+          "bcc": {
+            "description": "Additional blind copies",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Bcc",
+            "type": "array"
+          },
           "body_html": {
             "anyOf": [
               {
@@ -1752,6 +1839,15 @@
             "example": "Thank you for confirming. I am closing this ticket now.",
             "title": "Body Text"
           },
+          "cc": {
+            "description": "Additional visible Cc addresses",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Cc",
+            "type": "array"
+          },
           "conversation_id": {
             "anyOf": [
               {
@@ -1767,7 +1863,7 @@
           },
           "reply_all": {
             "default": false,
-            "description": "Accepted for client compatibility; messages have a single recipient, so true is rejected",
+            "description": "Also address the original visible To and Cc (own address excluded, Bcc never copied)",
             "title": "Reply All",
             "type": "boolean"
           },
@@ -1862,6 +1958,14 @@
             ],
             "title": "Authentication"
           },
+          "bcc": {
+            "description": "Only on the sender's own outbound copy",
+            "items": {
+              "type": "string"
+            },
+            "title": "Bcc",
+            "type": "array"
+          },
           "body_html": {
             "anyOf": [
               {
@@ -1876,6 +1980,13 @@
           "body_text": {
             "title": "Body Text",
             "type": "string"
+          },
+          "cc": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cc",
+            "type": "array"
           },
           "conversation_id": {
             "anyOf": [
@@ -1904,6 +2015,14 @@
               }
             ],
             "title": "Deleted At"
+          },
+          "deliveries": {
+            "description": "Per-recipient outcome of an outbound message",
+            "items": {
+              "$ref": "#/components/schemas/MessageDeliveryResponse"
+            },
+            "title": "Deliveries",
+            "type": "array"
           },
           "delivery_error": {
             "anyOf": [
@@ -2002,6 +2121,13 @@
             ],
             "title": "References"
           },
+          "reply_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reply To",
+            "type": "array"
+          },
           "rfc_message_id": {
             "title": "Rfc Message Id",
             "type": "string"
@@ -2058,6 +2184,13 @@
             "title": "Threat Score",
             "type": "number"
           },
+          "to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "To",
+            "type": "array"
+          },
           "verified_domain": {
             "anyOf": [
               {
@@ -2112,6 +2245,15 @@
             ],
             "title": "Attachments"
           },
+          "bcc": {
+            "description": "Blind copies: in the SMTP envelope only, never in a header",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Bcc",
+            "type": "array"
+          },
           "body_html": {
             "anyOf": [
               {
@@ -2136,6 +2278,15 @@
             "example": "Hello! We have reviewed your inquiry and resolved the issue.",
             "title": "Body Text"
           },
+          "cc": {
+            "description": "Visible Cc addresses",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Cc",
+            "type": "array"
+          },
           "conversation_id": {
             "anyOf": [
               {
@@ -2150,11 +2301,18 @@
             "title": "Conversation Id"
           },
           "recipient": {
-            "example": "customer@example.com",
-            "maxLength": 320,
-            "minLength": 3,
-            "title": "Recipient",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Legacy single To address; use `to`",
+            "title": "Recipient"
           },
           "scheduled_at": {
             "anyOf": [
@@ -2236,11 +2394,29 @@
               }
             ],
             "title": "Thread Id"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One address or a list of visible To addresses; at most 50 unique recipients in to, cc and bcc",
+            "example": [
+              "customer@example.com"
+            ],
+            "title": "To"
           }
         },
-        "required": [
-          "recipient"
-        ],
         "title": "MessageSendRequest",
         "type": "object"
       },
@@ -5632,7 +5808,7 @@
             }
           },
           {
-            "description": "delivered, accepted_by_relay, sending, delivery_unknown, pending_review, rejected, blocked, failed",
+            "description": "delivered, accepted_by_relay, sending, delivery_unknown, partially_failed, pending_review, rejected, blocked, failed",
             "in": "query",
             "name": "status",
             "required": false,
@@ -5645,7 +5821,7 @@
                   "type": "null"
                 }
               ],
-              "description": "delivered, accepted_by_relay, sending, delivery_unknown, pending_review, rejected, blocked, failed",
+              "description": "delivered, accepted_by_relay, sending, delivery_unknown, partially_failed, pending_review, rejected, blocked, failed",
               "title": "Status"
             }
           },
@@ -5939,7 +6115,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "pattern": "^(delivered|accepted_by_relay|sending|delivery_unknown|pending_review|rejected|blocked|failed)$",
+                  "pattern": "^(delivered|accepted_by_relay|sending|delivery_unknown|partially_failed|pending_review|rejected|blocked|failed)$",
                   "type": "string"
                 },
                 {

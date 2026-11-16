@@ -20,6 +20,7 @@ import { LabelEditor } from "@/components/inbox/LabelEditor";
 import { TriageBar } from "@/components/inbox/TriageBar";
 import { LifecycleTimeline } from "@/components/inbox/LifecycleTimeline";
 import { AttachmentList } from "@/components/inbox/AttachmentList";
+import { AddressLines, DeliveryTable } from "@/components/inbox/Recipients";
 import {
   TriageMessage,
   SignedAttachment,
@@ -30,6 +31,7 @@ import {
   replyScheduled,
   restoreMessage,
   sendScheduledMessage,
+  splitAddresses,
   statusClasses,
   trashMessage,
   updateMessageLabels,
@@ -94,12 +96,14 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
   const [handoffNote, setHandoffNote] = useState<string>("");
   const [sendingHandoff, setSendingHandoff] = useState<boolean>(false);
   const [handoffResult, setHandoffResult] = useState<string>("");
+  const [replyAll, setReplyAll] = useState<boolean>(false);
 
   // Keep unsent replies per inbox/thread on this device so navigating away from
   // a conversation does not discard a human's work.
   useEffect(() => {
     const previousKey = previousReplyDraftKey.current;
     if (previousKey === replyDraftKey) return;
+    setReplyAll(false);
     setReplyTemplateId("");
     setReplyTemplateData("{}");
     setReplyTemplatePreview(null);
@@ -125,6 +129,8 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
   // New Compose Outbound Modal
   const [isComposeOpen, setIsComposeOpen] = useState<boolean>(false);
   const [composeRecipient, setComposeRecipient] = useState<string>("");
+  const [composeCc, setComposeCc] = useState<string>("");
+  const [composeBcc, setComposeBcc] = useState<string>("");
   const [composeSubject, setComposeSubject] = useState<string>("");
   const [composeBody, setComposeBody] = useState<string>("");
   const [composeTemplateId, setComposeTemplateId] = useState("");
@@ -343,11 +349,13 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
       const replyBody = replyTemplateId
         ? { template_id: replyTemplateId, template_data: parseTemplateData(replyTemplateData) }
         : { body_text: replyText };
+      const replyOptions = replyAll ? { reply_all: true } : {};
       const replyAt = replySchedule ? toOffsetIso(replySchedule) : null;
       const reply = replyAt
-        ? ((await replyScheduled(selectedAgentEmail, latestMessage.id, { ...replyBody, scheduled_at: replyAt })) as unknown as Message)
-        : await api.replyMessage(selectedAgentEmail, latestMessage.id, replyBody);
+        ? ((await replyScheduled(selectedAgentEmail, latestMessage.id, { ...replyBody, ...replyOptions, scheduled_at: replyAt })) as unknown as Message)
+        : await api.replyMessage(selectedAgentEmail, latestMessage.id, { ...replyBody, ...replyOptions });
       setReplySchedule("");
+      setReplyAll(false);
       try { window.localStorage.removeItem(replyDraftKey); } catch { /* Best effort cleanup. */ }
       setReplyText("");
       setReplyTemplateId("");
@@ -421,20 +429,22 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
   // Handle Fresh Outbound Compose
   const handleComposeSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!composeRecipient || (!composeTemplateId && (!composeSubject || !composeBody))) return;
+    const to = splitAddresses(composeRecipient);
+    if (!to.length || (!composeTemplateId && (!composeSubject || !composeBody))) return;
+    const addressing = { to, cc: splitAddresses(composeCc), bcc: splitAddresses(composeBcc) };
     if (scheduleProblem(composeSchedule)) return;
     try {
       setSendingCompose(true);
       const composeAt = composeSchedule ? toOffsetIso(composeSchedule) : null;
       const content = composeTemplateId
         ? {
-          recipient: composeRecipient,
+          ...addressing,
           template_id: composeTemplateId,
           template_data: parseTemplateData(composeTemplateData),
           attachments: composeAttachments,
         }
         : {
-          recipient: composeRecipient,
+          ...addressing,
           subject: composeSubject,
           body_text: composeBody,
           attachments: composeAttachments,
@@ -445,6 +455,8 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
       setComposeSchedule("");
       setIsComposeOpen(false);
       setComposeRecipient("");
+      setComposeCc("");
+      setComposeBcc("");
       setComposeSubject("");
       setComposeBody("");
       setComposeTemplateId("");
@@ -509,6 +521,7 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
     { value: "accepted_by_relay", label: "Accepted by Relay" },
     { value: "sending", label: "Sending" },
     { value: "delivery_unknown", label: "Delivery Unknown" },
+    { value: "partially_failed", label: "Partially Failed" },
     { value: "pending_review", label: "Pending Review" },
     { value: "rejected", label: "Rejected" },
     { value: "blocked", label: "Blocked" },
@@ -627,7 +640,7 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className={`truncate ${msg.direction === "inbound" && !msg.is_read ? "font-semibold text-white" : "font-medium text-[#e6edf3]"}`}>
-                        {msg.direction === "inbound" ? msg.sender : `To: ${msg.recipient}`}
+                        {msg.direction === "inbound" ? msg.sender : `To: ${(msg.to?.length ? msg.to : [msg.recipient]).join(", ")}`}
                       </span>
                       <span className="text-[10px] font-mono text-[#8b949e] shrink-0">
                         {serverDate(msg.created_at).toLocaleTimeString([], {
@@ -717,10 +730,7 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
                     <span className="text-[#8b949e]">From:</span>
                     <span className="font-mono text-[#e6edf3]">{selectedMessage.sender}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#8b949e]">To:</span>
-                    <span className="font-mono text-blue-400">{selectedMessage.recipient}</span>
-                  </div>
+                  <AddressLines message={selectedMessage} />
                   <div className="flex justify-between text-[11px] text-[#8b949e]">
                     <span>Message-ID:</span>
                     <span className="font-mono truncate max-w-xs">{selectedMessage.rfc_message_id}</span>
@@ -786,7 +796,7 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
                     <article key={message.id} className={`rounded border p-3 ${message.id === selectedMessage.id ? "border-blue-500/50 bg-[#161b22]" : "border-[#30363d] bg-[#0d1117]"}`}>
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#8b949e]">
                         <span className="font-mono">
-                          {message.direction === "inbound" ? message.sender : `Agent → ${message.recipient}`}
+                          {message.direction === "inbound" ? message.sender : `Agent → ${(message.to?.length ? message.to : [message.recipient]).join(", ")}${message.cc?.length ? ` (cc ${message.cc.join(", ")})` : ""}`}
                         </span>
                         <span>{serverDate(message.created_at).toLocaleString()} · {String(message.status).replace("_", " ")}</span>
                       </div>
@@ -794,9 +804,10 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
                       <div className="text-xs text-[#c9d1d9] whitespace-pre-wrap leading-relaxed font-sans">{message.body_text}</div>
                       {message.delivery_error && (
                         <div className="mt-3 rounded border border-[#f85149]/30 bg-[#f85149]/10 p-2 text-xs text-[#f85149]">
-                          Delivery failed: {message.delivery_error}
+                          {message.status === "partially_failed" ? "Not every recipient was reached" : message.status === "delivery_unknown" ? "Delivery unknown" : "Delivery problem"}: {message.delivery_error}
                         </div>
                       )}
+                      {message.direction === "outbound" && <DeliveryTable message={message} />}
                       {message.provider_delivery_status && (
                         <div className={`mt-3 rounded border p-2 text-xs ${["bounced", "complained"].includes(message.provider_delivery_status) ? "border-[#f85149]/30 bg-[#f85149]/10 text-[#f85149]" : "border-[#30363d] bg-[#0d1117] text-[#8b949e]"}`}>
                           Provider delivery: {message.provider_delivery_status}
@@ -834,8 +845,17 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
                   <span className="flex items-center gap-1 text-[#e6edf3]">
                     <Reply className="w-3 h-3 text-blue-400" /> Reply in-thread
                   </span>
-                  <span className="font-mono">
-                    To: {selectedMessage.direction === "inbound" ? selectedMessage.sender : selectedMessage.recipient}
+                  <span className="flex items-center gap-3">
+                    <label className="flex items-center gap-1">
+                      <input type="checkbox" checked={replyAll} onChange={(event) => setReplyAll(event.target.checked)} />
+                      Reply all
+                    </label>
+                    <span className="font-mono">
+                      To: {selectedMessage.direction === "inbound"
+                        ? (selectedMessage.reply_to?.length ? selectedMessage.reply_to : [selectedMessage.sender]).join(", ")
+                        : (selectedMessage.to?.length ? selectedMessage.to : [selectedMessage.recipient]).join(", ")}
+                      {replyAll && " + original To/Cc (without this inbox)"}
+                    </span>
                   </span>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -934,15 +954,41 @@ export function MessagesView({ email, mode }: { email: string; mode: "messages" 
               </div>
 
               <div>
-                <label className="text-[#8b949e] block mb-1">Recipient</label>
+                <label htmlFor="compose-to" className="text-[#8b949e] block mb-1">To</label>
                 <input
-                  type="email"
+                  id="compose-to"
+                  type="text"
                   required
-                  placeholder="recipient@example.com"
+                  placeholder="recipient@example.com, second@example.com"
                   value={composeRecipient}
                   onChange={(e) => setComposeRecipient(e.target.value)}
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-xs text-[#e6edf3] focus:outline-none focus:border-zinc-500"
                 />
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="compose-cc" className="text-[#8b949e] block mb-1">Cc</label>
+                  <input
+                    id="compose-cc"
+                    type="text"
+                    placeholder="optional, comma separated"
+                    value={composeCc}
+                    onChange={(e) => setComposeCc(e.target.value)}
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-xs text-[#e6edf3] focus:outline-none focus:border-zinc-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="compose-bcc" className="text-[#8b949e] block mb-1">Bcc (hidden from everyone else)</label>
+                  <input
+                    id="compose-bcc"
+                    type="text"
+                    placeholder="optional, comma separated"
+                    value={composeBcc}
+                    onChange={(e) => setComposeBcc(e.target.value)}
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-xs text-[#e6edf3] focus:outline-none focus:border-zinc-500"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
