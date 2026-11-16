@@ -33,7 +33,7 @@ import {
 } from "./types";
 
 const API_BASE = "/api/backend";
-type MessageStatus = "delivered" | "accepted_by_relay" | "sending" | "delivery_unknown" | "pending_review" | "rejected" | "blocked" | "failed";
+type MessageStatus = "delivered" | "accepted_by_relay" | "sending" | "delivery_unknown" | "partially_failed" | "pending_review" | "rejected" | "blocked" | "failed";
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
@@ -201,7 +201,7 @@ export const api = {
 
   sendMessage: (
     agentEmail: string,
-    data: { recipient: string; thread_id?: string; conversation_id?: string; attachments?: OutboundAttachmentInput[] } & (
+    data: { to: string[]; cc?: string[]; bcc?: string[]; thread_id?: string; conversation_id?: string; attachments?: OutboundAttachmentInput[] } & (
       { subject: string; body_text: string; body_html?: string; template_id?: never; template_data?: never } |
       { template_id: string; template_data?: Record<string, unknown>; subject?: never; body_text?: never; body_html?: never }
     ),
@@ -216,7 +216,7 @@ export const api = {
   replyMessage: (
     agentEmail: string,
     messageId: string,
-    data: { conversation_id?: string; attachments?: OutboundAttachmentInput[] } & (
+    data: { conversation_id?: string; attachments?: OutboundAttachmentInput[]; reply_all?: boolean; cc?: string[]; bcc?: string[] } & (
       { body_text: string; body_html?: string; template_id?: never; template_data?: never } |
       { template_id: string; template_data?: Record<string, unknown>; body_text?: never; body_html?: never }
     ),

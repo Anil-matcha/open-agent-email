@@ -89,7 +89,10 @@ async def notify_review_requested(review_id: str) -> bool:
             preview = " ".join(message.body_text.split())[:PREVIEW_CHARS]
             body = (
                 f"{agent.display_name} <{agent.email}> wants to send an email that is waiting for your approval.\n\n"
-                f"To: {message.recipient}\nSubject: {message.subject}\n\nPreview:\n{preview}\n\n"
+                f"To: {', '.join(message.to)}\n"
+                + (f"Cc: {', '.join(message.cc)}\n" if message.cc else "")
+                + (f"Bcc: {', '.join(message.bcc)}\n" if message.bcc else "")
+                + f"Subject: {message.subject}\n\nPreview:\n{preview}\n\n"
                 f"Approve (send it): {links['approve']}\n\nReject (discard it): {links['reject']}\n\n"
                 "Each link opens a confirmation page and works once. They expire "
                 f"{int(lifetime.total_seconds() // 3600)} hours after this email was sent."

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { ReviewItem } from "@/lib/types";
+import { AddressLines } from "@/components/inbox/Recipients";
 
 export default function ReviewsPage() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
@@ -207,6 +208,7 @@ export default function ReviewsPage() {
                 </h3>
                 <div className="bg-[#0d1117] p-2.5 rounded border border-[#30363d] text-xs text-[#8b949e] space-y-0.5">
                   <div>Sender: <span className="text-[#e6edf3] font-mono">{selectedReview.message?.sender}</span></div>
+                  {selectedReview.message && <AddressLines message={selectedReview.message} />}
                   <div>Target Agent: <span className="text-blue-400 font-mono">{selectedReview.agent_email}</span></div>
                   <div>Reason: <span className="text-[#d29922]">{selectedReview.reason}</span></div>
                 </div>

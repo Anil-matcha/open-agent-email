@@ -6,7 +6,7 @@ The SDKs offer two equivalent styles. The original flat names (`send_message`, `
 
 | Short form (accepted everywhere) | Canonical field | Where |
 |---|---|---|
-| `to` | `recipient` | send, forward |
+| `to` | `recipient` | forward (single address) |
 | `text` | `body_text` | send, reply |
 | `html` | `body_html` | send, reply |
 | `page_token` | `cursor` | message and thread page routes |
@@ -15,7 +15,7 @@ The SDKs offer two equivalent styles. The original flat names (`send_message`, `
 
 If both forms are sent they must agree, otherwise the request is rejected with 422.
 
-`reply_all` is accepted on reply for client compatibility, but messages have a single recipient, so `true` is rejected with the code `reply_all_unsupported`.
+On send, `to` is canonical and takes one address or a list; `cc` and `bcc` are lists. The legacy `recipient` (one address) still works and must match `to` when both are sent. On reply, `reply_all: true` also addresses the original visible To and Cc, and `cc`/`bcc` add recipients; see [Multiple recipients](reference.md#multiple-recipients-cc-bcc-and-reply-all).
 
 ## Python
 

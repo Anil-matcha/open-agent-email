@@ -103,7 +103,9 @@ export function absoluteSignedLink(downloadUrl: string): string {
 }
 
 export interface ScheduledSendBody {
-  recipient: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
   subject?: string;
   body_text?: string;
   template_id?: string;
@@ -118,17 +120,22 @@ export const sendScheduledMessage = (email: string, body: ScheduledSendBody) =>
 export const replyScheduled = (
   email: string,
   messageId: string,
-  body: { body_text?: string; template_id?: string; template_data?: Record<string, unknown>; scheduled_at: string },
+  body: { body_text?: string; template_id?: string; template_data?: Record<string, unknown>; scheduled_at: string; reply_all?: boolean },
 ) =>
   call<TriageMessage>(`${inbox(email)}/messages/${encodeURIComponent(messageId)}/reply`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 
+/** Split a typed address list ("a@x, b@y; c@z") into entries; the server validates each one. */
+export function splitAddresses(value: string): string[] {
+  return value.split(/[,;\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
 /** Badge colours for a status, including the scheduled and canceled states. */
 export function statusClasses(status: string): string {
   if (status === "delivered" || status === "accepted_by_relay") return "bg-[#238636]/10 text-[#2ea043] border-[#2ea043]/30";
-  if (status === "pending_review" || status === "sending" || status === "delivery_unknown" || status === "scheduled") {
+  if (status === "pending_review" || status === "sending" || status === "delivery_unknown" || status === "partially_failed" || status === "scheduled") {
     return "bg-[#9e6a03]/10 text-[#d29922] border-[#d29922]/30";
   }
   if (status === "canceled") return "bg-[#30363d]/40 text-[#8b949e] border-[#30363d]";

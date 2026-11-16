@@ -154,7 +154,7 @@ def _decode_message_cursor(
 async def list_messages(
     email: str,
     direction: Optional[str] = Query(None, description="inbound or outbound"),
-    status: Optional[str] = Query(None, description="delivered, accepted_by_relay, sending, delivery_unknown, pending_review, rejected, blocked, failed"),
+    status: Optional[str] = Query(None, description="delivered, accepted_by_relay, sending, delivery_unknown, partially_failed, pending_review, rejected, blocked, failed"),
     thread_id: Optional[str] = Query(None),
     conversation_id: Optional[str] = Query(None, max_length=255),
     label: Optional[str] = Query(None, max_length=64, description="Only messages carrying this label"),
@@ -213,7 +213,7 @@ async def page_messages(
     read_status: str = Query("all", pattern="^(unread|read|all)$"),
     status: Optional[str] = Query(
         None,
-        pattern="^(delivered|accepted_by_relay|sending|delivery_unknown|pending_review|rejected|blocked|failed)$",
+        pattern="^(delivered|accepted_by_relay|sending|delivery_unknown|partially_failed|pending_review|rejected|blocked|failed)$",
         description="Filter by delivery status",
     ),
     q: Optional[str] = Query(None, max_length=200, description="Search sender and subject"),
@@ -437,7 +437,7 @@ async def get_message_lifecycle(email: str, message_id: str, db: AsyncSession = 
     return {"message_id": message.id, "status": message.status, "events": events, "entries": entries}
 
 
-_DERIVED_STATUS_CODES = {"sending", "accepted_by_relay", "delivered", "delivery_unknown", "blocked", "failed", "canceled", "scheduled"}
+_DERIVED_STATUS_CODES = {"sending", "accepted_by_relay", "delivered", "delivery_unknown", "partially_failed", "blocked", "failed", "canceled", "scheduled"}
 
 
 def _derived_code(event_type: str) -> str:
@@ -539,7 +539,9 @@ async def send_message(email: str, req: MessageSendRequest, request: Request, db
     message = await EmailService.send_outbound(
         db=db,
         agent=agent,
-        recipient=req.recipient,
+        recipient=req.to,
+        cc=req.cc,
+        bcc=req.bcc,
         subject=subject,
         body_text=body_text,
         body_html=body_html,
@@ -553,8 +555,6 @@ async def send_message(email: str, req: MessageSendRequest, request: Request, db
 
 @router.post("/{message_id}/reply", response_model=MessageResponse, status_code=201, dependencies=[Depends(require_write)])
 async def reply_message(email: str, message_id: str, req: MessageReplyRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    if req.reply_all:
-        raise HTTPException(status_code=422, detail={"code": "reply_all_unsupported", "message": "Messages have a single recipient, so reply_all is not supported; reply to the sender instead"})
     # Verify agent exists
     ag_res = await db.execute(select(Agent).where(Agent.email == email))
     agent = ag_res.scalar_one_or_none()
@@ -567,7 +567,7 @@ async def reply_message(email: str, message_id: str, req: MessageReplyRequest, r
     if not original_msg:
         raise HTTPException(status_code=404, detail="Target message to reply to was not found")
 
-    reply_recipient = original_msg.sender if original_msg.direction == "inbound" else original_msg.recipient
+    reply_to, reply_cc = EmailService.reply_recipients(original_msg, agent.email, reply_all=req.reply_all)
     subject = original_msg.subject
     if not subject.lower().startswith("re:"):
         subject = f"Re: {subject}"
@@ -577,7 +577,9 @@ async def reply_message(email: str, message_id: str, req: MessageReplyRequest, r
     reply_msg = await EmailService.send_outbound(
         db=db,
         agent=agent,
-        recipient=reply_recipient,
+        recipient=reply_to,
+        cc=reply_cc + req.cc,
+        bcc=req.bcc,
         subject=subject,
         body_text=body_text,
         body_html=body_html,

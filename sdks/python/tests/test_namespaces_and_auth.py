@@ -20,7 +20,11 @@ def client(server):
 def test_messages_send_maps_short_names_to_canonical_body(server, client):
     server.route("POST", f"{BASE}/messages", {"id": "m1"})
     client.inboxes.messages.send(AG, to="p@example.com", subject="Hi", text="plain", html="<p>x</p>")
-    assert server.last["body"] == {"recipient": "p@example.com", "subject": "Hi", "body_text": "plain", "body_html": "<p>x</p>"}
+    assert server.last["body"] == {"to": "p@example.com", "subject": "Hi", "body_text": "plain", "body_html": "<p>x</p>"}
+    client.inboxes.messages.send(AG, to=["p@example.com", "q@example.com"], cc=["c@example.com"], bcc=["b@example.com"],
+                                 subject="Hi", text="plain")
+    assert server.last["body"] == {"to": ["p@example.com", "q@example.com"], "cc": ["c@example.com"],
+                                   "bcc": ["b@example.com"], "subject": "Hi", "body_text": "plain"}
 
 
 def test_messages_list_returns_a_page_and_passes_page_token_as_cursor(server, client):
@@ -30,12 +34,12 @@ def test_messages_list_returns_a_page_and_passes_page_token_as_cursor(server, cl
     assert server.last["query"] == {"limit": "5", "read_status": "unread", "cursor": "tok"}
 
 
-def test_reply_and_forward_use_short_names_and_reject_reply_all(server, client):
+def test_reply_and_forward_use_short_names_and_pass_reply_all(server, client):
     server.route("POST", f"{BASE}/messages/m1/reply", {"id": "m2"})
     client.inboxes.messages.reply(AG, "m1", text="answer")
     assert server.last["body"] == {"body_text": "answer"}
-    with pytest.raises(ValueError, match="reply_all"):
-        client.inboxes.messages.reply(AG, "m1", text="x", reply_all=True)
+    client.inboxes.messages.reply(AG, "m1", text="x", reply_all=True)
+    assert server.last["body"] == {"reply_all": True, "body_text": "x"}
     server.route("POST", f"{BASE}/messages/m1/forward", {"id": "m3"})
     client.inboxes.messages.forward(AG, "m1", to="lead@example.com", note="fyi")
     assert server.last["body"] == {"recipient": "lead@example.com", "note": "fyi"}

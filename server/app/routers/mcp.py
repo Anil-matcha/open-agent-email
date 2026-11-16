@@ -14,12 +14,16 @@ from app.services.hitl_service import HitlService
 from app.services.otp_finder import find_recent_otp
 from app.security import Principal, get_principal
 from app.tenancy import DEFAULT_TENANT_ID
-from app.schemas import ReviewDecisionRequest, normalize_send_at
+from app.schemas import MessageResponse, MessageSendRequest, ReviewDecisionRequest, normalize_send_at
 from app.routers import reviews as reviews_router
 from app.routers import agents as agents_router, messages as messages_router
 from app.routers.mcp_extra import EXT_ADMIN, EXT_NAMES, EXT_READ, EXT_TOOLS, EXT_WRITE, _mcp_request, run_ext_tool
 
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol (MCP)"])
+
+ADDRESS_LIST_PROP = {"type": "array", "items": {"type": "string"}, "maxItems": 50}
+TO_PROP = {"anyOf": [{"type": "string"}, ADDRESS_LIST_PROP],
+           "description": "One To address or a list; at most 50 unique recipients across to, cc and bcc"}
 
 MCP_TOOLS = [
     {
@@ -43,7 +47,7 @@ MCP_TOOLS = [
             "properties": {
                 "agent_email": {"type": "string", "description": "Agent email address"},
                 "direction": {"type": "string", "enum": ["inbound", "outbound"], "description": "Optional filter"},
-                "status": {"type": "string", "enum": ["delivered", "accepted_by_relay", "sending", "delivery_unknown", "pending_review", "rejected", "blocked", "failed"]},
+                "status": {"type": "string", "enum": ["delivered", "accepted_by_relay", "sending", "delivery_unknown", "partially_failed", "pending_review", "rejected", "blocked", "failed"]},
                 "read_status": {"type": "string", "enum": ["unread", "read", "all"], "default": "all"},
                 "q": {"type": "string", "maxLength": 200},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
@@ -85,7 +89,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "agent_email": {"type": "string"},
-                "recipient": {"type": "string"},
+                "to": TO_PROP,
+                "cc": ADDRESS_LIST_PROP,
+                "bcc": {**ADDRESS_LIST_PROP, "description": "Blind copies: SMTP envelope only, never shown in a header"},
+                "recipient": {"type": "string", "description": "Legacy single To address; use `to`"},
                 "subject": {"type": "string"},
                 "body_text": {"type": "string"},
                 "conversation_id": {"type": "string", "minLength": 1, "maxLength": 255},
@@ -96,7 +103,7 @@ MCP_TOOLS = [
                 }, "required": ["filename", "content_base64"]}},
                 "idempotency_key": {"type": "string", "maxLength": 128, "description": "Optional retry key; reuse only for the same request"}
             },
-            "required": ["agent_email", "recipient", "subject", "body_text"]
+            "required": ["agent_email", "subject", "body_text"]
         }
     },
     {
@@ -108,6 +115,10 @@ MCP_TOOLS = [
                 "agent_email": {"type": "string"},
                 "message_id": {"type": "string"},
                 "body_text": {"type": "string"},
+                "reply_all": {"type": "boolean", "default": False,
+                              "description": "Also address the original visible To and Cc (own address excluded, Bcc never copied)"},
+                "cc": ADDRESS_LIST_PROP,
+                "bcc": ADDRESS_LIST_PROP,
                 "conversation_id": {"type": "string", "minLength": 1, "maxLength": 255},
                 "attachments": {"type": "array", "items": {"type": "object", "properties": {
                     "filename": {"type": "string", "maxLength": 255},
@@ -218,6 +229,22 @@ MCP_TOOLS.extend([
     {"name": "reject_pending_message", "description": "Reject a message by message_id from the review queue.",
      "inputSchema": {"type": "object", "properties": {"message_id": {"type": "string"}, "notes": {"type": "string"}}, "required": ["message_id"]}},
 ])
+
+
+def _addressing(message) -> dict:
+    """Recipient fields of a message as the REST MessageResponse shows them."""
+    response = MessageResponse.model_validate(message)
+    return {
+        "recipient": response.recipient, "to": response.to, "cc": response.cc, "bcc": response.bcc,
+        "reply_to": response.reply_to, "deliveries": [d.model_dump(mode="json") for d in response.deliveries],
+    }
+
+
+def _address_list(value) -> list:
+    """An MCP cc/bcc argument as a list; a single string is one address, never split into characters."""
+    if value is None:
+        return []
+    return [value] if isinstance(value, str) else list(value)
 
 
 def _parse_send_at(value):
@@ -394,7 +421,7 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
             msgs = (await db.execute(q.order_by(Message.created_at.desc()).limit(limit))).scalars().all()
             return json.dumps([{
                 "id": m.id, "direction": m.direction, "sender": m.sender, "recipient": m.recipient,
-                "subject": m.subject, "status": m.status, "provider_delivery_status": m.provider_delivery_status,
+                "to": m.to, "cc": m.cc, "subject": m.subject, "status": m.status, "provider_delivery_status": m.provider_delivery_status,
                 "threat_score": m.threat_score, "created_at": m.created_at.isoformat(),
             } for m in msgs], indent=2)
         limit = args.get("limit", 50)
@@ -427,6 +454,7 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         return json.dumps({
             "id": msg.id,
             "sender": msg.sender,
+            **_addressing(msg),
             "subject": msg.subject,
             "body_text": msg.body_text,
             "status": msg.status,
@@ -464,10 +492,14 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         ag = res.scalar_one_or_none()
         if not ag:
             raise ValueError(f"Agent {args['agent_email']} not found")
+        addressing = MessageSendRequest.model_validate(
+            {key: args[key] for key in ("to", "recipient", "cc", "bcc") if args.get(key) is not None})
         msg = await EmailService.send_outbound(
             db=db,
             agent=ag,
-            recipient=args["recipient"],
+            recipient=addressing.to,
+            cc=addressing.cc,
+            bcc=addressing.bcc,
             subject=args["subject"],
             body_text=args["body_text"],
             conversation_id=args.get("conversation_id"),
@@ -495,13 +527,18 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         if not orig:
             raise ValueError(f"Message {args['message_id']} not found")
         
-        reply_recipient = orig.sender if orig.direction == "inbound" else orig.recipient
+        reply_all = args.get("reply_all", False)
+        if not isinstance(reply_all, bool):
+            raise ValueError("reply_all must be a boolean")
+        reply_to, reply_cc = EmailService.reply_recipients(orig, ag.email, reply_all=reply_all)
         subj = f"Re: {orig.subject}" if not orig.subject.lower().startswith("re:") else orig.subject
         in_reply_to, references = EmailService.reply_headers(orig)
         reply_msg = await EmailService.send_outbound(
             db=db,
             agent=ag,
-            recipient=reply_recipient,
+            recipient=reply_to,
+            cc=reply_cc + _address_list(args.get("cc")),
+            bcc=_address_list(args.get("bcc")),
             subject=subj,
             body_text=args["body_text"],
             attachments=decode_attachment_inputs(args.get("attachments")),
@@ -597,7 +634,7 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         message = review.message
         return json.dumps({"review_id": review.id, "message_id": review.message_id, "agent_email": review.agent_email,
                            "reason": review.reason, "threat_score": review.threat_score, "status": review.status,
-                           "message": {"id": message.id, "sender": message.sender, "recipient": message.recipient,
+                           "message": {"id": message.id, "sender": message.sender, **_addressing(message),
                                        "subject": message.subject, "body_text": message.body_text,
                                        "status": message.status} if message else None}, indent=2)
 
@@ -612,7 +649,7 @@ async def execute_mcp_tool(db: AsyncSession, name: str, args: dict, principal: P
         m = review.message
         return json.dumps({"review_id": review.id, "message_id": m.id, "agent_email": review.agent_email,
                            "reason": review.reason, "threat_score": review.threat_score, "status": review.status,
-                           "sender": m.sender, "recipient": m.recipient, "subject": m.subject,
+                           "sender": m.sender, **_addressing(m), "subject": m.subject,
                            "body_text": m.body_text, "message_status": m.status}, indent=2)
 
     elif name == "approve_review" or original_name == "approve_pending_message":

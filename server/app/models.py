@@ -190,7 +190,13 @@ class Message(TenantOwned, Base):
     direction = Column(String(16), nullable=False)  # inbound, outbound
     is_read = Column(Boolean, nullable=False, default=False, index=True)
     sender = Column(String(255), nullable=False)
-    recipient = Column(String(255), nullable=False)
+    recipient = Column(String(255), nullable=False)  # outbound: first To; inbound: the receiving inbox
+    # Visible header recipients as bare lowercase addresses. NULL means unknown (stored before
+    # multi-recipient support). bcc_recipients is only ever set on the sender's own outbound copy.
+    to_recipients = Column(JSON, nullable=True)
+    cc_recipients = Column(JSON, nullable=True)
+    bcc_recipients = Column(JSON, nullable=True)
+    reply_to = Column(JSON, nullable=True)
     subject = Column(String(512), default="(No Subject)")
     body_text = Column(Text, nullable=False)
     body_html = Column(Text, nullable=True)
@@ -239,6 +245,18 @@ class Message(TenantOwned, Base):
     def scheduled_at(self):
         """Canonical API name for the legacy scheduled_for storage column."""
         return self.scheduled_for
+
+    @property
+    def to(self):
+        return list(self.to_recipients) if self.to_recipients is not None else [self.recipient]
+
+    @property
+    def cc(self):
+        return list(self.cc_recipients or [])
+
+    @property
+    def bcc(self):
+        return list(self.bcc_recipients or []) if self.direction == "outbound" else []
     
     # State & Threat
     status = Column(String(32), default="delivered", index=True)  # delivered, accepted_by_relay, sending, delivery_unknown, pending_review, rejected, blocked, failed
@@ -250,6 +268,31 @@ class Message(TenantOwned, Base):
     agent = relationship("Agent", back_populates="messages")
     review_item = relationship("ReviewItem", back_populates="message", uselist=False, cascade="all, delete-orphan")
     attachments = relationship("MessageAttachment", back_populates="message", cascade="all, delete-orphan")
+    # Per-recipient outcome of an outbound message; never present on inbound copies.
+    deliveries = relationship("MessageRecipient", order_by="MessageRecipient.id", lazy="selectin",
+                              cascade="all, delete-orphan")
+
+
+class MessageRecipient(TenantOwned, Base):
+    """Delivery state of one envelope recipient of an outbound message.
+
+    Each recipient is submitted in its own SMTP transaction, and its state is committed before and
+    after that transaction, so a retry never resubmits a recipient that was already accepted.
+    """
+    __tablename__ = "message_recipients"
+    __table_args__ = (UniqueConstraint("message_id", "address", name="uq_message_recipients_message_address"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_id = Column(String(64), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    address = Column(String(255), nullable=False)
+    kind = Column(String(8), nullable=False)  # to, cc, bcc
+    # pending, sending, accepted_by_relay, delivered, failed, blocked, delivery_unknown
+    status = Column(String(24), nullable=False, default="pending")
+    detail = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    provider_delivery_status = Column(String(32), nullable=True)
+    provider_delivery_error = Column(Text, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
 class MessagePurgeLog(TenantOwned, Base):
@@ -448,13 +491,14 @@ class MessageLifecycleEntry(TenantOwned, Base):
 # written by HitlService.resolve_review (a compare-and-set core UPDATE this listener cannot see).
 LIFECYCLE_CODES = (
     "created", "scheduled", "canceled", "queued", "review_requested", "review_approved", "review_rejected",
-    "sending", "accepted_by_relay", "delivered", "delivery_unknown", "blocked", "failed",
+    "sending", "accepted_by_relay", "delivered", "delivery_unknown", "blocked", "failed", "partially_failed",
     "provider_delivered", "provider_delayed", "provider_bounced", "provider_complained", "provider_rejected",
     "trashed", "restored",
 )
 _STATUS_TO_CODE = {
     "scheduled": "scheduled", "canceled": "canceled", "sending": "sending", "accepted_by_relay": "accepted_by_relay",
     "delivered": "delivered", "delivery_unknown": "delivery_unknown", "blocked": "blocked", "failed": "failed",
+    "partially_failed": "partially_failed",
 }
 
 
