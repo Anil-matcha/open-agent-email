@@ -517,6 +517,7 @@ class MessageDeliveryResponse(BaseModel):
     attempts: int
     provider_delivery_status: Optional[str] = None
     provider_delivery_error: Optional[str] = None
+    relay_message_id: Optional[str] = None
     updated_at: datetime
 
     class Config:

@@ -292,6 +292,8 @@ class MessageRecipient(TenantOwned, Base):
     attempts = Column(Integer, nullable=False, default=0)
     provider_delivery_status = Column(String(32), nullable=True)
     provider_delivery_error = Column(Text, nullable=True)
+    # Id the relay assigned to this recipient's copy (Amazon SES rewrites Message-ID per transaction).
+    relay_message_id = Column(String(128), nullable=True, index=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 

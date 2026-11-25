@@ -174,6 +174,37 @@ async def test_signed_message_verifies_against_published_key(client, dns, monkey
     assert tampered != raw and not dkim.verify(tampered, dnsfunc=published)
 
 
+async def test_signature_covers_long_per_recipient_references(client, dns, monkeypatch):
+    """Follow-ups carry each recipient's SES ids; the longer, folded References must still verify."""
+    import dkim, smtplib
+    rec = await register(client)
+    publish(dns, rec)
+    await client.post(f"/v1/domains/{D}/verify", headers=ADMIN)
+    async with AsyncSessionLocal() as db:
+        params = await EmailService._dkim_signing_for(db, f"bot@{D}", "default")
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def starttls(self): pass
+        def login(self, *a): pass
+        def sendmail(self, frm, to, data):
+            sent["data"] = data
+            return {}
+        def quit(self): pass
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    refs = " ".join(f"<010701a1dc5c{n:04x}-b56f0c74-292f-4a92-9b37-6758da280deb-000000@eu-central-1.amazonses.com>"
+                    for n in range(4))
+    ok, _ = _send_smtp_sync("relay", 587, "", "", False, False, f"bot@{D}", "to@example.net", "Re: Hi", "body",
+                            in_reply_to=refs.split()[-1], references=refs, dkim_signing=params)
+    assert ok
+    raw = sent["data"].encode() if isinstance(sent["data"], str) else sent["data"]
+    published = lambda name, timeout=5: rec["dkim_record"].encode()  # noqa: E731
+    assert dkim.verify(raw, dnsfunc=published)
+    assert not dkim.verify(raw.replace(b"0000@eu-central-1", b"0000@eu-west-1", 1), dnsfunc=published)
+
+
 async def test_configured_signing_failure_refuses_smtp_submission(monkeypatch):
     import smtplib
     sent = {}

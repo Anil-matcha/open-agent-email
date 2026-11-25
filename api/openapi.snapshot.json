@@ -1610,6 +1610,17 @@
             ],
             "title": "Provider Delivery Status"
           },
+          "relay_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relay Message Id"
+          },
           "status": {
             "title": "Status",
             "type": "string"
