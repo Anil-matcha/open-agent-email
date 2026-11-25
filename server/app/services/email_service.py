@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import hashlib
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -15,12 +16,12 @@ from email.utils import formatdate, make_msgid
 from html import escape
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import func, select, or_
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 from app.tenancy import enforce_policies
 
-from app.models import Agent, Message, MessageAttachment, ReviewItem, SecurityEvent, SmtpConfig, OutboundJob, WebhookEndpoint, WebhookDelivery, UnsubscribeToken, Contact, ContactEngagement
+from app.models import Agent, Message, MessageAttachment, MessageRecipient, ReviewItem, SecurityEvent, SmtpConfig, OutboundJob, WebhookEndpoint, WebhookDelivery, UnsubscribeToken, Contact, ContactEngagement
 from app.config import settings
 from app.services.smtp_secrets import decrypt_password
 from app.schemas import ThreatScanResult
@@ -34,7 +35,7 @@ from app.services.webhook_events import (
 )
 from app.services.attachment_utils import validate_composed_message_size
 from app.services.attachment_scan import scan_attachments
-from app.services.recipient_suppressions import canonicalize_recipient, get_recipient_suppression
+from app.services.recipient_suppressions import canonicalize_recipient, canonicalize_recipient_lists, get_recipient_suppression
 from app.services.unsubscribe import issue_token, public_base_url
 from app.database import AsyncSessionLocal
 from app.services.idempotency import reserve_idempotency, complete_idempotency, release_idempotency_claim
@@ -43,9 +44,12 @@ logger = logging.getLogger("email_service")
 # Headers covered by our DKIM signature. Date and Message-ID are deliberately NOT signed: relays such as
 # Amazon SES replace both (SES substitutes its own Message-ID and reformats Date), which breaks any signature
 # that covers them. A live test through SES showed exactly that failure, with the body hash still matching.
-DKIM_SIGNED_HEADERS = [b"from", b"to", b"subject", b"reply-to", b"in-reply-to", b"references",
+DKIM_SIGNED_HEADERS = [b"from", b"to", b"cc", b"subject", b"reply-to", b"in-reply-to", b"references",
                        b"mime-version", b"content-type", b"list-unsubscribe", b"list-unsubscribe-post"]
 SMTP_ACCEPTANCE_UNKNOWN = "SMTP relay connection ended during message submission; relay acceptance is unknown"
+# Stop starting new recipients after this long so one dispatch stays well inside the worker's
+# 300 s lease; the remaining recipients stay pending for the next attempt.
+DISPATCH_BUDGET_SECONDS = 120
 
 def _send_smtp_sync(
     host: str,
@@ -68,12 +72,21 @@ def _send_smtp_sync(
     feedback_correlation_id: Optional[str] = None,
     dkim_signing: Optional[Dict[str, str]] = None,
     ses_configuration_set: Optional[str] = None,
+    cc_addr: Optional[str] = None,
+    rcpt_to: Optional[str] = None,
 ) -> Tuple[bool, str]:
+    """Submit one SMTP transaction.
+
+    ``to_addr``/``cc_addr`` are the visible header values; ``rcpt_to`` is the single envelope recipient
+    (defaults to ``to_addr``). Bcc recipients are only ever passed as ``rcpt_to``, never in a header.
+    """
     submission_started = False
     try:
         msg = MIMEMultipart("mixed") if attachments else MIMEMultipart("alternative")
         msg["From"] = from_addr
         msg["To"] = to_addr
+        if cc_addr:
+            msg["Cc"] = cc_addr
         msg["Subject"] = subject
         if reply_to:
             msg["Reply-To"] = reply_to
@@ -153,7 +166,7 @@ def _send_smtp_sync(
                     pass
                 return False, f"Configured DKIM signing failed: {type(exc).__name__}"
         submission_started = True
-        refused = server.sendmail(from_addr, [to_addr], message_data)
+        refused = server.sendmail(from_addr, [rcpt_to or to_addr], message_data)
         try:
             server.quit()
         except Exception as e:
@@ -163,7 +176,15 @@ def _send_smtp_sync(
             refusal_codes = [str(response[0]) for response in refused.values() if response]
             return False, f"SMTP relay refused the recipient (code {refusal_codes[0] if refusal_codes else 'unknown'})"
         return True, "Accepted by upstream SMTP relay"
+    except smtplib.SMTPRecipientsRefused as e:
+        # A definitive RCPT refusal: the relay did not take the message for this recipient.
+        codes = [str(response[0]) for response in e.recipients.values() if response]
+        return False, f"SMTP relay refused the recipient (code {codes[0] if codes else 'unknown'})"
+    except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as e:
+        # The relay answered with an error code, so it did not accept the message.
+        return False, f"SMTP relay rejected the message (code {e.smtp_code})"
     except (smtplib.SMTPServerDisconnected, TimeoutError, ConnectionError, OSError) as e:
+        # smtplib.SMTPException is an OSError; only a lost connection or timeout is ambiguous.
         if submission_started:
             logger.error("SMTP relay connection ended during message submission; acceptance is unknown")
             return False, SMTP_ACCEPTANCE_UNKNOWN
@@ -172,6 +193,36 @@ def _send_smtp_sync(
     except Exception as e:
         logger.error(f"SMTP delivery failed: {e}")
         return False, str(e)
+
+
+DELIVERED_STATES = {"accepted_by_relay", "delivered"}
+
+
+def summarize_deliveries(rows: List[MessageRecipient]) -> Tuple[str, str]:
+    """Message status and detail derived from its per-recipient states.
+
+    Any unknown outcome dominates (it must never be retried blindly); a mix of accepted and
+    failed/blocked recipients is ``partially_failed`` so nobody resends the whole message.
+    """
+    statuses = {row.status for row in rows}
+    if "delivery_unknown" in statuses:
+        status = "delivery_unknown"
+    elif statuses == {"delivered"}:
+        status = "delivered"
+    elif statuses and statuses <= DELIVERED_STATES:
+        status = "accepted_by_relay"
+    elif statuses & DELIVERED_STATES:
+        status = "partially_failed"
+    elif statuses == {"blocked"}:
+        status = "blocked"
+    else:
+        status = "failed"
+    if len(rows) == 1:
+        return status, rows[0].detail or ""
+    accepted = sum(row.status in DELIVERED_STATES for row in rows)
+    problems = [f"{row.address}: {row.status}" + (f" ({row.detail})" if row.detail else "")
+                for row in rows if row.status not in DELIVERED_STATES]
+    return status, "; ".join([f"Accepted for {accepted} of {len(rows)} recipients", *problems])[:4000]
 
 
 class EmailService:
@@ -198,6 +249,40 @@ class EmailService:
         return parent_id, " ".join(selected) or None
 
     @staticmethod
+    def reply_recipients(original: Message, own_address: str, reply_all: bool = False) -> Tuple[List[str], List[str]]:
+        """To and Cc for a reply, built only from visible headers (Reply-To, From, To, Cc), never Bcc.
+
+        Inbound: To is the Reply-To (own address removed) or else the sender. Outbound (own sent
+        mail): To is the original To. Reply-All adds the original visible To/Cc as Cc and drops the
+        own address everywhere; duplicates are removed case-insensitively later by send_outbound.
+        Inbound messages stored before header capture have unknown To/Cc and add nothing.
+        """
+        own = own_address.strip().lower()
+
+        def others(values):
+            kept = []
+            for value in values or []:
+                try:
+                    address = canonicalize_recipient(value)
+                except ValueError:
+                    continue
+                if address != own and address not in kept:
+                    kept.append(address)
+            return kept
+
+        if original.direction == "inbound":
+            to = others(original.reply_to) or [original.sender]
+            cc = others([*(original.to_recipients or []), *(original.cc_recipients or [])]) if reply_all else []
+        else:
+            to = list(original.to)
+            cc = others(original.cc) if reply_all else []
+        if reply_all:
+            to = others(to)
+            if not to and cc:
+                to = [cc.pop(0)]
+        return to, cc
+
+    @staticmethod
     async def _dkim_signing_for(db: AsyncSession, from_addr: str, tenant_id: str) -> Optional[Dict[str, str]]:
         """DKIM parameters when the From domain is a registered, fully verified domain with a managed key."""
         from app.models import Domain
@@ -216,6 +301,26 @@ class EmailService:
             raise RuntimeError("Configured DKIM signing key is unavailable") from exc
         return {"domain": domain.domain, "selector": domain.dkim_selector, "private_key": key}
 
+    @staticmethod
+    async def delivery_rows(db: AsyncSession, message: Message) -> List[MessageRecipient]:
+        """Per-recipient rows of an outbound message, created from the stored lists if missing."""
+        rows = list((await db.execute(
+            select(MessageRecipient).where(MessageRecipient.message_id == message.id).order_by(MessageRecipient.id)
+        )).scalars().all())
+        if rows:
+            return rows
+        seen = set()
+        for kind, addresses in (("to", message.to), ("cc", message.cc), ("bcc", message.bcc)):
+            for address in addresses:
+                key = address.strip().lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    rows.append(MessageRecipient(
+                        tenant_id=message.tenant_id, message_id=message.id, address=key, kind=kind, status="pending"))
+        db.add_all(rows)
+        await db.commit()
+        return rows
+
     @classmethod
     async def dispatch_to_upstream(
         cls,
@@ -224,114 +329,161 @@ class EmailService:
         agent: Agent
     ) -> Tuple[str, str]:
         """
-        Dispatches an accepted outbound email:
-        - If recipient is a local agent, performs local loopback delivery.
-        - Local loopback is delivered directly to the recipient inbox.
-        - External SMTP success means accepted by the relay, not delivered to the recipient.
+        Dispatches an accepted outbound email, one recipient at a time:
+        - A recipient that is a local agent inbox gets a local copy (visible To/Cc only, never Bcc).
+        - Every other recipient gets its own SMTP transaction with the same visible headers.
+        - Each recipient's state is committed before and after its submission. Recipients already
+          accepted, blocked or of unknown outcome are never submitted again by this method.
+        External SMTP success means accepted by the relay, not delivered to the recipient.
         """
         platform_originated = message.sender != agent.email
-        # A suppression may have been added after queuing or while awaiting review.
-        # Recheck immediately before either local loopback or external SMTP dispatch.
-        if await get_recipient_suppression(db, agent.email, message.recipient):
-            return "blocked", "Recipient is suppressed for this inbox; no delivery attempt was made"
+        rows = await cls.delivery_rows(db, message)
+        for row in rows:
+            if row.status == "sending":
+                # A previous attempt died between submission and recording its result.
+                row.status, row.detail = "delivery_unknown", SMTP_ACCEPTANCE_UNKNOWN
+        await db.commit()
+        to_header = ", ".join(message.to)
+        cc_header = ", ".join(message.cc) or None
+        relay = None
+        attachments = None
+        deadline = time.monotonic() + DISPATCH_BUDGET_SECONDS
 
-        # 1. Local loopback check
-        recip_agent_res = await db.execute(select(Agent).where(Agent.email == message.recipient))
-        recip_agent = None if platform_originated else recip_agent_res.scalar_one_or_none()
-        if recip_agent:
-            logger.info(f"Local delivery to agent {recip_agent.email}")
-            attachment_rows = (await db.execute(
-                select(MessageAttachment).where(MessageAttachment.message_id == message.id)
-            )).scalars().all()
-            # The sender's Message-ID is the dedup key, so an outbox retry that
-            # reaches this point again returns the stored copy instead of adding one.
-            inbound, _scan, review = await cls.process_inbound(
-                db,
-                recip_agent,
-                sender=message.sender,
+        for row in rows:
+            if row.status not in {"pending", "failed"}:
+                continue
+            if time.monotonic() > deadline:
+                break
+            # A suppression may have been added after queuing or while awaiting review.
+            # Recheck immediately before either local loopback or external SMTP dispatch.
+            if await get_recipient_suppression(db, agent.email, row.address):
+                row.status, row.detail = "blocked", "Recipient is suppressed for this inbox; no delivery attempt was made"
+                await db.commit()
+                continue
+            if attachments is None:
+                attachments = [
+                    {"filename": a.filename, "content_type": a.content_type, "content": a.content}
+                    for a in (await db.execute(
+                        select(MessageAttachment).where(MessageAttachment.message_id == message.id)
+                    )).scalars().all()
+                ]
+
+            recip_agent = None if platform_originated else await db.scalar(
+                select(Agent).where(func.lower(Agent.email) == row.address))
+            if recip_agent:
+                logger.info(f"Local delivery to agent {recip_agent.email}")
+                # The sender's Message-ID is the dedup key, so an outbox retry that
+                # reaches this point again returns the stored copy instead of adding one.
+                # The copy carries only the visible headers: no Bcc list, no delivery results.
+                inbound, _scan, review = await cls.process_inbound(
+                    db,
+                    recip_agent,
+                    sender=message.sender,
+                    subject=message.subject,
+                    body_text=message.body_text,
+                    body_html=message.body_html,
+                    auth_evidence={
+                        "local_delivery": True,
+                        "authentication": {
+                            "spf": {"status": "unverified"},
+                            "dkim": [],
+                            "dmarc": {"status": "unverified"},
+                        },
+                    },
+                    raw_message_id=message.rfc_message_id,
+                    in_reply_to=message.in_reply_to,
+                    references=message.references,
+                    attachments=attachments,
+                    to_recipients=message.to,
+                    cc_recipients=message.cc,
+                )
+                row.attempts += 1
+                row.status = "delivered"
+                row.detail = (
+                    "Delivered locally; held for review in the recipient inbox" if inbound.status == "pending_review"
+                    else "Delivered locally; blocked by the recipient inbox threat screening" if inbound.status == "blocked"
+                    else "Delivered locally to agent inbox"
+                )
+                await db.commit()
+                continue
+
+            if relay is None:
+                relay = await cls._relay_settings(db, message, agent, platform_originated)
+            if isinstance(relay, str):
+                logger.info(f"Could not deliver to {row.address}: {relay}")
+                row.status, row.detail = "failed", relay
+                await db.commit()
+                continue
+
+            unsubscribe_url = None
+            base_url = public_base_url()
+            if base_url and not platform_originated:
+                raw_token, token_hash = issue_token()
+                db.add(UnsubscribeToken(
+                    tenant_id=agent.tenant_id,
+                    token_hash=token_hash,
+                    agent_email=agent.email,
+                    recipient=row.address,
+                ))
+                unsubscribe_url = f"{base_url}/unsubscribe/{raw_token}"
+            # Persist the in-flight state (and any unsubscribe capability) before SMTP can accept mail.
+            row.status, row.detail = "sending", None
+            row.attempts += 1
+            await db.commit()
+            success, info = await asyncio.to_thread(
+                _send_smtp_sync,
+                **relay,
+                to_addr=to_header,
+                cc_addr=cc_header,
+                rcpt_to=row.address,
                 subject=message.subject,
                 body_text=message.body_text,
                 body_html=message.body_html,
-                auth_evidence={
-                    "local_delivery": True,
-                    "authentication": {
-                        "spf": {"status": "unverified"},
-                        "dkim": [],
-                        "dmarc": {"status": "unverified"},
-                    },
-                },
-                raw_message_id=message.rfc_message_id,
                 in_reply_to=message.in_reply_to,
                 references=message.references,
-                attachments=[
-                    {"filename": a.filename, "content_type": a.content_type, "content": a.content}
-                    for a in attachment_rows
-                ],
+                reply_to=None if platform_originated else agent.email,
+                custom_msg_id=message.rfc_message_id,
+                unsubscribe_url=unsubscribe_url,
+                feedback_correlation_id=message.id if settings.SES_FEEDBACK_TOPIC_ARN.strip() else None,
+                ses_configuration_set=settings.SES_CONFIGURATION_SET.strip() or None,
+                attachments=attachments,
             )
-            if inbound.status == "pending_review":
-                return "delivered", "Delivered locally; held for review in the recipient inbox"
-            if inbound.status == "blocked":
-                return "delivered", "Delivered locally; blocked by the recipient inbox threat screening"
-            return "delivered", "Delivered locally to agent inbox"
-
-        # 2. Upstream SMTP relay check
-        smtp_res = await db.execute(select(SmtpConfig).where(SmtpConfig.id == "default"))
-        config = smtp_res.scalar_one_or_none()
-        if not config or not config.enabled or not config.host:
-            logger.info(f"Upstream SMTP relay not configured. Could not deliver to {message.recipient}")
-            return "failed", "Upstream SMTP relay is not configured or enabled"
-
-        from_addr = message.sender if platform_originated else (config.from_email or agent.email)
-        unsubscribe_url = None
-        base_url = public_base_url()
-        if base_url and not platform_originated:
-            raw_token, token_hash = issue_token()
-            db.add(UnsubscribeToken(
-                tenant_id=agent.tenant_id,
-                token_hash=token_hash,
-                agent_email=agent.email,
-                recipient=canonicalize_recipient(message.recipient),
-            ))
-            # Persist before SMTP can accept mail containing this capability.
+            row.status = (
+                "accepted_by_relay" if success
+                else "delivery_unknown" if info == SMTP_ACCEPTANCE_UNKNOWN
+                else "failed"
+            )
+            row.detail = info
             await db.commit()
-            unsubscribe_url = f"{base_url}/unsubscribe/{raw_token}"
+        return summarize_deliveries(rows)
+
+    @classmethod
+    async def _relay_settings(cls, db: AsyncSession, message: Message, agent: Agent,
+                              platform_originated: bool) -> Dict[str, Any] | str:
+        """SMTP connection and signing parameters, or the reason the relay cannot be used."""
+        config = await db.scalar(select(SmtpConfig).where(SmtpConfig.id == "default"))
+        if not config or not config.enabled or not config.host:
+            return "Upstream SMTP relay is not configured or enabled"
+        from_addr = message.sender if platform_originated else (config.from_email or agent.email)
         try:
             dkim_signing = await cls._dkim_signing_for(db, from_addr, agent.tenant_id)
         except RuntimeError as exc:
-            return "failed", str(exc)
-        port_num = int(config.port) if str(config.port).isdigit() else 587
+            return str(exc)
         try:
             smtp_password = decrypt_password(config.password)
         except RuntimeError as exc:
             logger.error("SMTP credential decryption failed: %s", exc)
-            return "failed", "SMTP relay credential is unavailable; verify SMTP_CONFIG_ENCRYPTION_KEY"
-        success, info = await asyncio.to_thread(
-            _send_smtp_sync,
-            host=config.host,
-            port=port_num,
-            username=config.username,
-            password=smtp_password,
-            use_tls=config.use_tls,
-            use_ssl=config.use_ssl,
-            from_addr=from_addr,
-            to_addr=message.recipient,
-            subject=message.subject,
-            body_text=message.body_text,
-            body_html=message.body_html,
-            in_reply_to=message.in_reply_to,
-            references=message.references,
-            reply_to=None if platform_originated else agent.email,
-            custom_msg_id=message.rfc_message_id,
-            unsubscribe_url=unsubscribe_url,
-            feedback_correlation_id=message.id if settings.SES_FEEDBACK_TOPIC_ARN.strip() else None,
-            dkim_signing=dkim_signing,
-            ses_configuration_set=settings.SES_CONFIGURATION_SET.strip() or None,
-            attachments=[{"filename": a.filename, "content_type": a.content_type, "content": a.content}
-                         for a in (await db.execute(select(MessageAttachment).where(MessageAttachment.message_id == message.id))).scalars().all()]
-        )
-        if not success and info == SMTP_ACCEPTANCE_UNKNOWN:
-            return "delivery_unknown", info
-        return ("accepted_by_relay" if success else "failed"), info
+            return "SMTP relay credential is unavailable; verify SMTP_CONFIG_ENCRYPTION_KEY"
+        return {
+            "host": config.host,
+            "port": int(config.port) if str(config.port).isdigit() else 587,
+            "username": config.username,
+            "password": smtp_password,
+            "use_tls": config.use_tls,
+            "use_ssl": config.use_ssl,
+            "from_addr": from_addr,
+            "dkim_signing": dkim_signing,
+        }
 
     @classmethod
     async def process_inbound(
@@ -353,6 +505,9 @@ class EmailService:
         references: Optional[str] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
         force_review: bool = False,
+        to_recipients: Optional[List[str]] = None,
+        cc_recipients: Optional[List[str]] = None,
+        reply_to: Optional[List[str]] = None,
     ) -> Tuple[Message, ThreatScanResult, Optional[ReviewItem]]:
         """
         Processes inbound email:
@@ -437,6 +592,10 @@ class EmailService:
             direction="inbound",
             sender=sender,
             recipient=agent.email,
+            # Visible headers only. An inbound copy never records Bcc, whatever the sender's header said.
+            to_recipients=list(to_recipients) if to_recipients is not None else None,
+            cc_recipients=list(cc_recipients) if cc_recipients is not None else None,
+            reply_to=list(reply_to) if reply_to else None,
             subject=subject,
             body_text=body_text,
             body_html=body_html,
@@ -650,7 +809,7 @@ class EmailService:
         cls,
         db: AsyncSession,
         agent: Agent,
-        recipient: str,
+        recipient: str | List[str],
         subject: str,
         body_text: str,
         body_html: Optional[str] = None,
@@ -662,6 +821,8 @@ class EmailService:
         idempotency_key: Optional[str] = None,
         send_at: Optional[datetime.datetime] = None,
         sender: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
     ) -> Message:
         """
         Sends an outbound email as the agent.
@@ -673,20 +834,27 @@ class EmailService:
         await scan_attachments(attachments)
         raw_recipient = recipient
         try:
-            recipient = canonicalize_recipient(recipient)
+            to_list, cc_list, bcc_list = canonicalize_recipient_lists(recipient, cc, bcc)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        recipient = to_list[0]
         validate_composed_message_size(subject, body_text or "", body_html, attachments)
         # A hosted layer may refuse here (daily caps, review holds). Nothing has been stored or reserved yet.
-        await enforce_policies("message.send", db=db, tenant_id=agent.tenant_id, agent=agent, recipient=recipient)
+        await enforce_policies("message.send", db=db, tenant_id=agent.tenant_id, agent=agent, recipient=recipient,
+                               recipients=[*to_list, *cc_list, *bcc_list])
         request_hash = None
         idempotency_decision = None
         if idempotency_key is not None:
             idempotency_key = idempotency_key.strip()
             if not idempotency_key or len(idempotency_key) > 128:
                 raise HTTPException(status_code=400, detail="Idempotency-Key must contain 1 to 128 characters")
+            # Extra keys only appear for multi-recipient requests, so single-recipient digests
+            # (and receipts stored by older releases) are unchanged.
             request_fields = {
                 "recipient": recipient,
+                **({"to": to_list} if len(to_list) > 1 else {}),
+                **({"cc": cc_list} if cc_list else {}),
+                **({"bcc": bcc_list} if bcc_list else {}),
                 "sender": sender or agent.email,
                 "subject": subject,
                 "body_text": body_text,
@@ -705,7 +873,7 @@ class EmailService:
             canonical_request = json.dumps(request_fields, sort_keys=True, separators=(",", ":"))
             request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
             legacy_request_hash = None
-            if raw_recipient != recipient:
+            if isinstance(raw_recipient, str) and raw_recipient != recipient and len(to_list) == 1 and not cc_list and not bcc_list:
                 legacy_request = json.dumps(
                     {**request_fields, "recipient": raw_recipient},
                     sort_keys=True,
@@ -750,13 +918,16 @@ class EmailService:
 
         # Preserve idempotent retries of a message already accepted before the
         # recipient was suppressed, while blocking creation of any new message.
-        suppression = await get_recipient_suppression(db, agent.email, recipient)
-        if suppression:
+        suppressed = [address for address in (*to_list, *cc_list, *bcc_list)
+                      if await get_recipient_suppression(db, agent.email, address)]
+        if suppressed:
             if idempotency_decision is not None:
                 await release_idempotency_claim(AsyncSessionLocal, idempotency_decision)
             raise HTTPException(
                 status_code=422,
-                detail="This inbox has suppressed outbound email to the requested recipient.",
+                detail="This inbox has suppressed outbound email to the requested recipient."
+                if len(suppressed) == 1 and len(to_list) + len(cc_list) + len(bcc_list) == 1
+                else f"This inbox has suppressed outbound email to: {', '.join(suppressed)}",
             )
 
         msg_id = f"msg_{uuid.uuid4().hex[:12]}"
@@ -779,6 +950,9 @@ class EmailService:
             is_read=True,
             sender=sender or agent.email,
             recipient=recipient,
+            to_recipients=to_list,
+            cc_recipients=cc_list,
+            bcc_recipients=bcc_list,
             subject=subject,
             body_text=body_text,
             body_html=body_html,
@@ -800,6 +974,10 @@ class EmailService:
         message.request_hash = request_hash
         message.scheduled_for = send_at
         message.labels = []
+        message.deliveries = [
+            MessageRecipient(tenant_id=agent.tenant_id, address=address, kind=kind, status="pending")
+            for kind, addresses in (("to", to_list), ("cc", cc_list), ("bcc", bcc_list)) for address in addresses
+        ]
         db.add(message)
 
         for attachment in attachments or []:

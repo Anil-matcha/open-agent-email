@@ -320,7 +320,9 @@ test("inboxes.messages.send maps short names to the canonical body", async () =>
   await client.inboxes.messages.send(INBOX, { to: "p@example.com", subject: "Hi", text: "plain", html: "<p>x</p>" });
   assert.equal(calls[0]!.method, "POST");
   assert.equal(calls[0]!.url.pathname, `${base}/messages`);
-  assert.deepEqual(JSON.parse(calls[0]!.body!), { recipient: "p@example.com", subject: "Hi", body_text: "plain", body_html: "<p>x</p>" });
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { to: "p@example.com", subject: "Hi", body_text: "plain", body_html: "<p>x</p>" });
+  await client.inboxes.messages.send(INBOX, { to: ["p@example.com", "q@example.com"], cc: ["c@example.com"], bcc: ["b@example.com"], subject: "Hi", text: "plain" });
+  assert.deepEqual(JSON.parse(calls[1]!.body!), { to: ["p@example.com", "q@example.com"], cc: ["c@example.com"], bcc: ["b@example.com"], subject: "Hi", body_text: "plain" });
 });
 
 test("inboxes.messages.list passes pageToken as cursor and query as q", async () => {
@@ -331,13 +333,14 @@ test("inboxes.messages.list passes pageToken as cursor and query as q", async ()
   assert.deepEqual([q.get("limit"), q.get("cursor"), q.get("q"), q.get("read_status")], ["5", "tok", "inv", "unread"]);
 });
 
-test("inboxes.messages.reply and forward use short names; replyAll is rejected", async () => {
+test("inboxes.messages.reply and forward use short names; replyAll maps to reply_all", async () => {
   const { client, calls } = mock({ json: { id: "m2" } });
   await client.inboxes.messages.reply(INBOX, "m1", { text: "answer" });
   assert.deepEqual(JSON.parse(calls[0]!.body!), { body_text: "answer" });
-  assert.throws(() => client.inboxes.messages.reply(INBOX, "m1", { text: "x", replyAll: true }), /replyAll/);
+  await client.inboxes.messages.reply(INBOX, "m1", { text: "x", replyAll: true });
+  assert.deepEqual(JSON.parse(calls[1]!.body!), { body_text: "x", reply_all: true });
   await client.inboxes.messages.forward(INBOX, "m1", { to: "lead@example.com", note: "fyi" });
-  assert.deepEqual(JSON.parse(calls[1]!.body!), { recipient: "lead@example.com", note: "fyi" });
+  assert.deepEqual(JSON.parse(calls[2]!.body!), { recipient: "lead@example.com", note: "fyi" });
 });
 
 test("inboxes.messages.update supports add/remove and replace", async () => {

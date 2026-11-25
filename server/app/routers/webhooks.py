@@ -34,7 +34,7 @@ DELIVERY_STATUSES = {"pending", "processing", "delivered", "failed"}
 WEBHOOK_EVENT_TYPES = {
     "email.received", "email.review_requested", "email.review_approved",
     "email.review_rejected", "email.flagged", "email.blocked",
-    "email.accepted_by_relay", "email.failed", "email.delivery_unknown",
+    "email.accepted_by_relay", "email.failed", "email.partially_failed", "email.delivery_unknown",
     "email.delivered", "email.bounced", "email.complained", "email.delivery_delayed",
     "email.sent", "domain.sending_verified", "domain.sending_failed", "domain.suppression_added",
     "agent.suppression_added",

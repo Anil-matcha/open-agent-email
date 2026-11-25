@@ -14,6 +14,7 @@ const LABELS: Record<string, string> = {
   accepted_by_relay: "Accepted by relay",
   delivered: "Delivered",
   delivery_unknown: "Delivery unknown",
+  partially_failed: "Partially failed",
   blocked: "Blocked",
   failed: "Failed",
   canceled: "Canceled",

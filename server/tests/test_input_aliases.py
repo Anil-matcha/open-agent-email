@@ -34,16 +34,17 @@ async def test_canonical_names_still_work(client):
     assert r.status_code == 201, r.text
 
 
-async def test_reply_accepts_text_alias_and_rejects_reply_all(client):
+async def test_reply_accepts_text_alias_and_reply_all(client):
     await _agent(client)
     mid = (await _send(client, to="p@example.com", subject="Hi", text="x")).json()["id"]
     ok = await client.post(f"{BASE}/messages/{mid}/reply", headers=ADMIN, json={"text": "answer"})
     assert ok.status_code == 201 and ok.json()["body_text"] == "answer"
     flag_off = await client.post(f"{BASE}/messages/{mid}/reply", headers=ADMIN, json={"text": "a", "reply_all": False})
     assert flag_off.status_code == 201
+    # reply_all was rejected while messages had a single recipient; it is supported now.
     all_ = await client.post(f"{BASE}/messages/{mid}/reply", headers=ADMIN, json={"text": "a", "reply_all": True})
-    assert all_.status_code == 422
-    assert all_.json()["error"]["code"] == "reply_all_unsupported"
+    assert all_.status_code == 201, all_.text
+    assert all_.json()["to"] == ["p@example.com"] and all_.json()["cc"] == []
 
 
 async def test_forward_accepts_to_alias(client):

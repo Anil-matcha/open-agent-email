@@ -104,13 +104,32 @@ export interface ThreatScanResult {
   analysis_summary: string;
 }
 
+export interface MessageDelivery {
+  address: string;
+  kind: "to" | "cc" | "bcc";
+  status: "pending" | "sending" | "accepted_by_relay" | "delivered" | "failed" | "blocked" | "delivery_unknown";
+  detail?: string | null;
+  attempts: number;
+  provider_delivery_status?: string | null;
+  provider_delivery_error?: string | null;
+  updated_at: string;
+}
+
 export interface Message {
   id: string;
   agent_email: string;
   direction: "inbound" | "outbound";
   is_read: boolean;
   sender: string;
+  /** First To address (outbound) or the receiving inbox (inbound). */
   recipient: string;
+  to?: string[];
+  cc?: string[];
+  /** Only on the sender's own outbound copy. */
+  bcc?: string[];
+  reply_to?: string[];
+  /** Per-recipient outcome of an outbound message. */
+  deliveries?: MessageDelivery[];
   subject: string;
   body_text: string;
   body_html?: string;
@@ -127,7 +146,7 @@ export interface Message {
   delivery_error?: string | null;
   provider_delivery_status?: "delivered" | "bounced" | "complained" | "delayed" | "rejected" | null;
   provider_delivery_error?: string | null;
-  status: "delivered" | "accepted_by_relay" | "sending" | "delivery_unknown" | "pending_review" | "rejected" | "blocked" | "failed";
+  status: "delivered" | "accepted_by_relay" | "sending" | "delivery_unknown" | "partially_failed" | "pending_review" | "rejected" | "blocked" | "failed";
   threat_score: number;
   threat_details: string; // JSON string
   created_at: string;
@@ -257,6 +276,7 @@ export type WebhookEventType =
   | "email.blocked"
   | "email.accepted_by_relay"
   | "email.failed"
+  | "email.partially_failed"
   | "email.delivery_unknown"
   | "email.delivered"
   | "email.bounced"

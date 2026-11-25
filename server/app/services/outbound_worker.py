@@ -9,7 +9,7 @@ from sqlalchemy import or_, select, update
 
 from app import metrics_registry
 from app.database import AsyncSessionLocal
-from app.models import Agent, Message, OutboundJob
+from app.models import Agent, Message, MessageRecipient, OutboundJob
 from app.services.email_service import EmailService
 from app.services.ws_manager import ws_manager
 from app.services.webhook_events import enqueue_outbound_status_webhook_event
@@ -53,6 +53,12 @@ async def _dispatch_one() -> bool:
                 .values(status="uncertain", locked_at=None, last_error=STALE_DELIVERY_UNKNOWN)
             )
             if marked.rowcount == 1:
+                # Only the recipient that was mid-submission is unknown; earlier results stay as recorded.
+                await db.execute(
+                    update(MessageRecipient)
+                    .where(MessageRecipient.message_id == stale_message_id, MessageRecipient.status == "sending")
+                    .values(status="delivery_unknown", detail=STALE_DELIVERY_UNKNOWN)
+                )
                 message = await db.get(Message, stale_message_id)
                 if message:
                     message.status = "delivery_unknown"
@@ -128,7 +134,14 @@ async def _dispatch_one() -> bool:
 
         job = await db.get(OutboundJob, job.id)
         message = await db.get(Message, job.message_id)
-        if status == "failed" and job.attempts < MAX_ATTEMPTS:
+        # Retry only while some recipient can still be (re)submitted; accepted, blocked and
+        # unknown recipients are never resubmitted by a retry.
+        open_states = {row.status for row in await _delivery_states(db, job.message_id)}
+        retryable = (
+            status in {"failed", "partially_failed", "delivery_unknown"} and bool(open_states & {"pending", "failed"})
+            if open_states else status == "failed"
+        )
+        if retryable and job.attempts < MAX_ATTEMPTS:
             delay = min(3600, 2 ** min(job.attempts, 10))
             rescheduled = await db.execute(
                 update(OutboundJob)
@@ -158,7 +171,7 @@ async def _dispatch_one() -> bool:
         completed_status = (
             "uncertain" if status == "delivery_unknown"
             else "blocked" if status == "blocked"
-            else "failed" if status == "failed"
+            else "failed" if status in {"failed", "partially_failed"}
             else "complete"
         )
         completed = await db.execute(
@@ -171,7 +184,7 @@ async def _dispatch_one() -> bool:
             .values(
                 status=completed_status,
                 locked_at=None,
-                last_error=info if status in {"failed", "delivery_unknown", "blocked"} else None,
+                last_error=info if status in {"failed", "partially_failed", "delivery_unknown", "blocked"} else None,
             )
         )
         if completed.rowcount != 1:
@@ -180,13 +193,14 @@ async def _dispatch_one() -> bool:
             return True
         if message:
             message.status = status
-            message.delivery_error = info if status in {"failed", "delivery_unknown", "blocked"} else None
+            message.delivery_error = info if status in {"failed", "partially_failed", "delivery_unknown", "blocked"} else None
             # `email.sent` means the message left this system: accepted by the upstream relay,
             # or delivered to a local inbox. It is not a delivery confirmation.
             event_types = {
                 "accepted_by_relay": ["email.accepted_by_relay", "email.sent"],
                 "delivered": ["email.sent"],
                 "failed": ["email.failed"],
+                "partially_failed": ["email.sent", "email.partially_failed"],
                 "delivery_unknown": ["email.delivery_unknown"],
                 "blocked": ["email.blocked"],
             }.get(status, [])
@@ -221,6 +235,7 @@ async def _dispatch_one() -> bool:
             }
             event_name = {
                 "failed": "email.failed",
+                "partially_failed": "email.partially_failed",
                 "blocked": "email.blocked",
                 "accepted_by_relay": "email.accepted",
                 "delivered": "email.sent",
@@ -229,6 +244,12 @@ async def _dispatch_one() -> bool:
             await ws_manager.send_agent_message(message.agent_email, event_name, payload)
             await ws_manager.broadcast_event(message.tenant_id, event_name, payload)
         return True
+
+
+async def _delivery_states(db, message_id: str):
+    return (await db.execute(
+        select(MessageRecipient.status).where(MessageRecipient.message_id == message_id)
+    )).all()
 
 
 async def run_outbound_worker() -> None:
