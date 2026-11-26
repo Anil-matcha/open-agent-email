@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app import metrics_registry
 from app.database import AsyncSessionLocal
 from app.models import Agent
+from app.services import agent_mail_gate
 from app.services.email_service import EmailService
 from app.services.mail_auth import evaluate_inbound_authentication, inbound_dmarc_disposition
 from app.services.attachment_scan import (
@@ -286,6 +287,7 @@ class SmtpHandler:
                     to_recipients=to_recipients,
                     cc_recipients=cc_recipients,
                     reply_to=reply_to,
+                    raw_message=raw_bytes,
                 )
                 logger.info(f"Delivered message {message.id} to agent {agent.email}. Verdict: {scan_result.verdict}")
 
@@ -380,6 +382,7 @@ def _smtp_protocol_factory():
 async def start_smtp_server(host: str = HOST, port: int = PORT):
     if REQUIRE_STARTTLS and TLS_CONTEXT is None:
         raise ValueError("SMTP_REQUIRE_STARTTLS requires SMTP_TLS_CERT_FILE and SMTP_TLS_KEY_FILE")
+    agent_mail_gate.check_configured()
     server = await asyncio.get_running_loop().create_server(
         _smtp_protocol_factory,
         host,
