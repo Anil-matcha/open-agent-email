@@ -25,6 +25,11 @@ class Message(TypedDict, total=False):
     is_read: bool
     sender: str
     recipient: str
+    to: list[str]
+    cc: list[str]
+    bcc: list[str]
+    reply_to: list[str]
+    deliveries: list[dict[str, Any]]
     subject: str
     body_text: str
     body_html: str | None
@@ -981,7 +986,10 @@ class AgentEmailClient:
         self,
         inbox: str,
         *,
-        recipient: str,
+        recipient: str | None = None,
+        to: str | list[str] | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
         subject: str | None = None,
         body_text: str | None = None,
         body_html: str | None = None,
@@ -997,8 +1005,18 @@ class AgentEmailClient:
         """Send direct content or render an inbox template for this message.
 
         `scheduled_at` defers submission (at most 90 days ahead); `send_at` remains a deprecated alias.
+        `to` takes one address or a list; `recipient` is the legacy single-address form. `bcc`
+        addresses are only used in the SMTP envelope, never in a header.
         """
-        payload: dict[str, Any] = {"recipient": recipient}
+        if recipient is None and to is None:
+            raise ValueError("to (or recipient) is required")
+        payload: dict[str, Any] = {"to": to} if to is not None else {"recipient": recipient}
+        if to is not None and recipient is not None:
+            payload["recipient"] = recipient
+        if cc:
+            payload["cc"] = cc
+        if bcc:
+            payload["bcc"] = bcc
         if send_at is not None and scheduled_at is not None and _format_send_at(send_at) != _format_send_at(scheduled_at):
             raise ValueError("scheduled_at and send_at must match when both are provided")
         schedule = scheduled_at if scheduled_at is not None else send_at
@@ -1050,9 +1068,21 @@ class AgentEmailClient:
         idempotency_key: str | None = None,
         send_at: datetime.datetime | str | None = None,
         scheduled_at: datetime.datetime | str | None = None,
+        reply_all: bool = False,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
     ) -> Message:
-        """Reply with direct content or render an inbox template in-thread (optionally scheduled)."""
+        """Reply with direct content or render an inbox template in-thread (optionally scheduled).
+
+        ``reply_all`` also addresses the original visible To/Cc (own address excluded, Bcc never copied).
+        """
         payload: dict[str, Any] = {}
+        if reply_all:
+            payload["reply_all"] = True
+        if cc:
+            payload["cc"] = cc
+        if bcc:
+            payload["bcc"] = bcc
         if send_at is not None and scheduled_at is not None and _format_send_at(send_at) != _format_send_at(scheduled_at):
             raise ValueError("scheduled_at and send_at must match when both are provided")
         schedule = scheduled_at if scheduled_at is not None else send_at

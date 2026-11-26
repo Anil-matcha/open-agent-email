@@ -860,7 +860,7 @@ async def test_policies_run_at_creation_and_send_time_and_can_refuse(client, wor
         raise HTTPException(status_code=403, detail="no domains")
 
     async def refuse_send(**ctx):
-        seen.append(("message.send", ctx["tenant_id"], ctx["recipient"]))
+        seen.append(("message.send", ctx["tenant_id"], ctx["recipient"], tuple(ctx["recipients"])))
         raise HTTPException(status_code=429, detail="daily limit")
 
     for event, fn in (("inbox.create", refuse_inbox), ("domain.create", refuse_domain), ("message.send", refuse_send)):
@@ -872,13 +872,13 @@ async def test_policies_run_at_creation_and_send_time_and_can_refuse(client, wor
         assert no.status_code == 403 and no.json()["detail"] == "not allowed"
         assert (await client.post("/v1/domains", headers=A_HEADERS, json={"domain": "new-a.example"})).status_code == 403
         sent = await client.post(f"/v1/agents/{a.email}/messages", headers=A_HEADERS, json={
-            "recipient": "x@example.org", "subject": "s", "body_text": "b"})
+            "to": "x@example.org", "cc": ["c@example.org"], "bcc": ["d@example.org"], "subject": "s", "body_text": "b"})
         assert sent.status_code == 429
     finally:
         for event, fn in (("inbox.create", refuse_inbox), ("domain.create", refuse_domain), ("message.send", refuse_send)):
             unregister_policy(event, fn)
     assert ("inbox.create", TENANT_A, "blocked@agents.example.com") in seen
-    assert ("message.send", TENANT_A, "x@example.org") in seen
+    assert ("message.send", TENANT_A, "x@example.org", ("x@example.org", "c@example.org", "d@example.org")) in seen
     async with AsyncSessionLocal() as db:
         assert await db.scalar(select(Agent.id).where(Agent.email == "blocked@agents.example.com")) is None
     # With no policies registered the core refuses nothing.

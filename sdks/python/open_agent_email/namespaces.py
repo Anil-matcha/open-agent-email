@@ -21,10 +21,10 @@ class Messages:
     def __init__(self, client: "AgentEmailClient"):
         self._c = client
 
-    def send(self, inbox: str, *, to: str, subject: str | None = None, text: str | None = None,
+    def send(self, inbox: str, *, to: str | list[str], subject: str | None = None, text: str | None = None,
              html: str | None = None, **options: Any) -> "Message":
-        """Send a message. ``options`` accepts the same keywords as ``send_message`` (attachments, scheduled_at, ...)."""
-        return self._c.send_message(inbox, recipient=to, subject=subject, body_text=text, body_html=html, **options)
+        """Send a message. ``options`` accepts the same keywords as ``send_message`` (cc, bcc, attachments, scheduled_at, ...)."""
+        return self._c.send_message(inbox, to=to, subject=subject, body_text=text, body_html=html, **options)
 
     def list(self, inbox: str, *, limit: int = 50, page_token: str | None = None, direction: str | None = None,
              read_status: str = "all", status: str | None = None, query: str | None = None) -> "MessagePage":
@@ -41,10 +41,8 @@ class Messages:
 
     def reply(self, inbox: str, message_id: str, *, text: str | None = None, html: str | None = None,
               reply_all: bool = False, **options: Any) -> "Message":
-        """Reply in the same thread to the other party. Messages have a single recipient, so ``reply_all`` is not supported."""
-        if reply_all:
-            raise ValueError("reply_all is not supported: messages have a single recipient")
-        return self._c.reply_message(inbox, message_id, body_text=text, body_html=html, **options)
+        """Reply in the same thread; ``reply_all`` also addresses the original visible To and Cc."""
+        return self._c.reply_message(inbox, message_id, body_text=text, body_html=html, reply_all=reply_all, **options)
 
     def forward(self, inbox: str, message_id: str, *, to: str, note: str | None = None) -> "Message":
         return self._c.forward_message(inbox, message_id, recipient=to, note=note)

@@ -8,7 +8,7 @@ import asyncio
 import email
 import hashlib
 from email import policy
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 import logging
 import re
 import ssl
@@ -95,6 +95,34 @@ def extract_smtp_path(line: str, command: str) -> str | None:
     return path
 
 
+MAX_HEADER_ADDRESSES = 100
+
+
+def visible_addresses(msg, header: str) -> list[str]:
+    """Bare lowercase addresses of a visible address header; unparsable entries are dropped.
+
+    Only To, Cc and Reply-To are ever read. An incoming Bcc header is ignored entirely.
+    """
+    try:
+        values = [str(value) for value in msg.get_all(header, [])]
+        pairs = getaddresses(values)
+    except Exception:  # A malformed header must not reject an otherwise deliverable message.
+        logger.info("Ignoring unparsable %s header", header)
+        return []
+    addresses = []
+    for _name, address in pairs:
+        # Stored as received (lowercased). Outbound use, e.g. Reply-All, validates strictly again.
+        address = address.strip().lower()
+        if ("@" not in address or len(address) > 255
+                or any(ord(ch) <= 32 or ord(ch) == 127 or ch in "<>,;" for ch in address)):
+            continue
+        if address not in addresses:
+            addresses.append(address)
+        if len(addresses) >= MAX_HEADER_ADDRESSES:
+            break
+    return addresses
+
+
 class SmtpMessageRejected(ValueError):
     """A permanent size or MIME-policy rejection suitable for SMTP 552."""
 
@@ -167,6 +195,9 @@ class SmtpHandler:
         raw_message_id = str(msg.get("Message-ID", "")).strip() or None
         in_reply_to = str(msg.get("In-Reply-To", "")).strip() or None
         references = str(msg.get("References", "")).strip() or None
+        to_recipients = visible_addresses(msg, "To")
+        cc_recipients = visible_addresses(msg, "Cc")
+        reply_to = visible_addresses(msg, "Reply-To")
 
         # Extract text and html
         body_text = ""
@@ -253,6 +284,9 @@ class SmtpHandler:
                     in_reply_to=in_reply_to,
                     references=references,
                     attachments=attachments,
+                    to_recipients=to_recipients,
+                    cc_recipients=cc_recipients,
+                    reply_to=reply_to,
                     raw_message=raw_bytes,
                 )
                 logger.info(f"Delivered message {message.id} to agent {agent.email}. Verdict: {scan_result.verdict}")
